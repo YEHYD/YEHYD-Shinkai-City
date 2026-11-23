@@ -1,7 +1,7 @@
 # Shinkai City
 
 一个零构建的 three.js 都市漫游 demo：新海诚风格的黄昏城市，第三人称主角，
-街上八个可交谈的角色，**每次对话都会沿着人物关系网悄悄改变其他人**。
+街上十五个可交谈的角色，**每次对话都会沿着人物关系网悄悄改变其他人**。
 
 ## 运行
 
@@ -21,7 +21,7 @@ node tools/build-single.mjs      # 产出 dist/index.html（约 4 MB）
 ```
 
 `dist/index.html` 是**双击就能跑**的一个文件：所有模块（含 three.js）被 esbuild 打成
-一个内联 `<script type="module">`，27 张角色立绘转成 base64 `data:` URL 一起塞进去，
+一个内联 `<script type="module">`，48 张角色立绘转成 base64 `data:` URL 一起塞进去，
 importmap 被去掉。页面在 `file://` 下不发起任何网络请求，所以没有 CORS 问题。
 
 - 构建需要 esbuild 二进制（不是 npm 依赖）：放在 `tools/esbuild.exe`，或用
@@ -101,6 +101,37 @@ git add index.html .nojekyll && git commit -m "deploy demo" && git push
 * 行人与车辆都走**分层抽样的车道槽位**，不是纯随机撒点——随机撒会让整条街空掉，
   只剩某个角落挤三个人。
 
+## 街上的人：十五个可交谈的角色
+
+八个是原来的居民（铃 女仆 / 蓝 计程车 / 青 执扇 / 墨 书虫 / 月 月见 / 白 白服 / 绯 绯衣 /
+汐 人鱼），另外七个来自 `素材/` 里的三视图，按调色板取名，都接在同一张关系网上：
+
+| 名字 | 身份 | 站在 | 开场白 |
+|---|---|---|---|
+| 荷 | 花匠 | (7.8, 66) | 「这些花是替你养的。你不知道吧。」 |
+| 砚 | 书商 | (-7.8, 70) | 「第三层有一本没有名字的书。别翻。」 |
+| 澪 | 摆渡 | (-7.8, -34) | 「水退下去的时候，这条路会变成河。」 |
+| 雪 | 信使 | (7.8, -66) | 「有你的信。寄信的人没写名字。」 |
+| 灼 | 铁匠 | (-66, 7.8) | 「铁冷下来的时候会响。你听见了吗。」 |
+| 霞 | 暗房 | (66, -7.8) | 「这个时间的颜色，我留不住，只能记着。」 |
+| 珀 | 调酒 | (-7.8, 88) | 「杯子我先温过了。坐吧。」 |
+
+原始三视图在 `素材/`（约 8.8 MB，和 `characters-src/` 一样不进 git），仓库里只放
+切好的 WebP。
+
+`src/actors/roster.js` 里的 `links` **是单向的**：传言只沿写下来的那条边走，
+所以想让两个人互相念叨，两边的边都要写。
+
+## 再加一个角色（从一张三视图开始）
+
+1. 把「一张图 = 一个角色，左→右 正/侧/背」的白底图丢进 `素材/`；
+2. 在 `tools/import-character-sheet.py` 的 `SHEETS` 里加一行 `文件名前缀: 角色 id`，
+   然后 `python tools/import-character-sheet.py`（只依赖 Pillow）——它从四边种子做
+   scanline flood fill 抠白底（`TOL=26` + 0.7 羽化，白衣服不会被挖穿），按列带切成
+   三视图，压到高 720 的 WebP，并**合并**进 `assets/characters/manifest.json`；
+3. 在 `src/actors/roster.js` 加一条：`id / name / role / line / accent / x / z / yaw /
+   height / mood`，再补几条 `links`。
+
 ## 对话如何影响别人
 
 `src/story/social.js` 是这套玩法的内核，模型很小但可读：
@@ -129,8 +160,10 @@ src/actors/             第三人称主角、billboard 精灵、角色花名册�
 src/camera/             第三人称相机（含建筑遮挡拉近、城市俯瞰）
 src/story/              社交内核 + 对话编排
 src/ui/                 HUD、对话面板、传送地图
-assets/characters/      已抠图并压缩的角色三视图（WebP）
+assets/characters/      已抠图并压缩的角色三视图（WebP，16 个角色 × 3 视角）
 tools/serve.mjs         零依赖静态服务器（no-store，改代码刷新即生效）
+tools/build-single.mjs  打成双击可运行的 dist/index.html
+tools/import-character-sheet.py  三视图素材 → 抠图/切分/WebP → manifest
 vendor/three/           three r187 + 用到的 addons
 ```
 
@@ -158,7 +191,8 @@ vendor/three/           three r187 + 用到的 addons
 * **灯光跟的是「暖」，不只是「夜」**。橱窗、招牌、售货机、路灯、塔楼窗格都写成
   `…·night + …·warm`：只按 `night` 算的话，18:03 的 `night` 才 0.1，整条街的店
   和灯都不亮，黄昏看起来像停电。加暖项后日落时店先亮、灯先燃，入夜再由 `night` 接管。
-* **没有外部图片资产**。立面、地面、云、招牌、光晕全部在 canvas 上程序化生成。
+* **除了立绘，没有外部图片资产**。立面、地面、云、招牌、光晕全部在 canvas 上程序化生成；
+  唯一的外部图是 `assets/characters/` 里的角色三视图。
 
 ## 已知取舍
 

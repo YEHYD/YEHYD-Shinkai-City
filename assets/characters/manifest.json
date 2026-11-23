@@ -187,5 +187,152 @@
         "aspect": 0.7189
       }
     }
+  },
+  "npc-lotus": {
+    "id": "npc-lotus",
+    "height": 720,
+    "views": {
+      "front": {
+        "w": 474,
+        "h": 720,
+        "aspect": 0.6583
+      },
+      "side": {
+        "w": 544,
+        "h": 720,
+        "aspect": 0.7556
+      },
+      "back": {
+        "w": 457,
+        "h": 720,
+        "aspect": 0.6347
+      }
+    }
+  },
+  "npc-inkstone": {
+    "id": "npc-inkstone",
+    "height": 720,
+    "views": {
+      "front": {
+        "w": 400,
+        "h": 720,
+        "aspect": 0.5556
+      },
+      "side": {
+        "w": 572,
+        "h": 720,
+        "aspect": 0.7944
+      },
+      "back": {
+        "w": 528,
+        "h": 720,
+        "aspect": 0.7333
+      }
+    }
+  },
+  "npc-mio": {
+    "id": "npc-mio",
+    "height": 720,
+    "views": {
+      "front": {
+        "w": 428,
+        "h": 720,
+        "aspect": 0.5944
+      },
+      "side": {
+        "w": 458,
+        "h": 720,
+        "aspect": 0.6361
+      },
+      "back": {
+        "w": 462,
+        "h": 720,
+        "aspect": 0.6417
+      }
+    }
+  },
+  "npc-yuki": {
+    "id": "npc-yuki",
+    "height": 720,
+    "views": {
+      "front": {
+        "w": 342,
+        "h": 720,
+        "aspect": 0.475
+      },
+      "side": {
+        "w": 355,
+        "h": 720,
+        "aspect": 0.4931
+      },
+      "back": {
+        "w": 344,
+        "h": 720,
+        "aspect": 0.4778
+      }
+    }
+  },
+  "npc-scorch": {
+    "id": "npc-scorch",
+    "height": 720,
+    "views": {
+      "front": {
+        "w": 377,
+        "h": 720,
+        "aspect": 0.5236
+      },
+      "side": {
+        "w": 389,
+        "h": 720,
+        "aspect": 0.5403
+      },
+      "back": {
+        "w": 369,
+        "h": 720,
+        "aspect": 0.5125
+      }
+    }
+  },
+  "npc-haze": {
+    "id": "npc-haze",
+    "height": 720,
+    "views": {
+      "front": {
+        "w": 590,
+        "h": 720,
+        "aspect": 0.8194
+      },
+      "side": {
+        "w": 503,
+        "h": 720,
+        "aspect": 0.6986
+      },
+      "back": {
+        "w": 580,
+        "h": 720,
+        "aspect": 0.8056
+      }
+    }
+  },
+  "npc-amber": {
+    "id": "npc-amber",
+    "height": 720,
+    "views": {
+      "front": {
+        "w": 484,
+        "h": 720,
+        "aspect": 0.6722
+      },
+      "side": {
+        "w": 573,
+        "h": 720,
+        "aspect": 0.7958
+      },
+      "back": {
+        "w": 541,
+        "h": 720,
+        "aspect": 0.7514
+      }
+    }
   }
 }

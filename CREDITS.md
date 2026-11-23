@@ -20,10 +20,12 @@ Per the MIT licence, that file keeps this notice at the top of its header commen
 
 ## Assets
 
-Character sprites in `assets/characters/` were provided by the project owner
-(`characters-src/`), keyed, cropped and downscaled to WebP by `tools/`' Python script.
-All textures in `src/core/textures.js` (facades, ground, clouds, signs, glows) are
-generated procedurally at runtime — there are no external image assets in the scene.
+Character sprites in `assets/characters/` were provided by the project owner. The first
+nine came from `characters-src/` (pre-cut front/side/back PNGs); the seven newest came from
+`素材/` as one three-view sheet each, keyed and split by `tools/import-character-sheet.py`.
+All textures in `src/core/textures.js` (facades, ground, clouds, signs, glows) are generated
+procedurally at runtime — apart from the character art there are no external image assets in
+the scene.
 
 ## Runtime
 

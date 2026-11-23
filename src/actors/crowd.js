@@ -40,7 +40,11 @@ export function createCrowd(sprites, opts = {}) {
   const rnd = makeRandom(70713);
   const count = opts.quality === 'lite' ? 210 : 520;
 
-  const arts = Object.keys(sprites).filter(id => id !== 'player' && sprites[id]?.front);
+  // Every artwork costs three InstancedMeshes (one per view), so the crowd only borrows a
+  // handful of the cast's drawings. Fifteen characters would mean 45 extra draw calls for
+  // pedestrians nobody looks at closely.
+  const all = Object.keys(sprites).filter(id => id !== 'player' && sprites[id]?.front);
+  const arts = all.slice(0, opts.maxArts ?? 9);
   const group = new THREE.Group();
   group.name = 'crowd';
   if (!arts.length) return { group, update() {}, dispose() {} };
