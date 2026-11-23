@@ -37,44 +37,6 @@ importmap 被去掉。页面在 `file://` 下不发起任何网络请求，所�
   `spriteSrc()` 取 data: URL（否则 404）、夜空云层亮度不能只按 `night` 保留 0.26 白
   （否则整片天被洗成暖灰）。
 
-## 部署到 GitHub Pages（发个链接给别人看）
-
-单文件版没有外部依赖，所以 GitHub Pages 只需要托管一个静态文件。已实测：把
-`dist/index.html` 放到子路径（`https://<user>.github.io/<repo>/`）下打开，
-`performance.getEntriesByType('resource')` 返回 **0 条请求**、72 fps、128 draw call、
-行人 520 / 车辆 260 全在，console 只有一行 `[shinkai] ready`。
-
-两条路，任选：
-
-**A. 不要 Actions（最省事）** —— 适合只要一个能点的链接：
-
-```bash
-node tools/build-single.mjs
-cp dist/index.html index.html     # 放到仓库根
-touch .nojekyll                   # 别让 Jekyll 处理它
-git add index.html .nojekyll && git commit -m "deploy demo" && git push
-```
-
-然后 Settings → Pages → Source: **Deploy from a branch** → `main` / `(root)`。
-
-**B. 用仓库里现成的 workflow** —— 保留源码树，`dist/` 由 CI 重新构建，不会出现
-「源码改了、线上还是旧包」：
-
-- 仓库已带 `.github/workflows/pages.yml`（`npm i esbuild` → `node tools/build-single.mjs`
-  → 上传 `dist` → 部署）。
-- Settings → Pages → Source: **GitHub Actions**，之后 push `main` 就自动发布。
-- workflow 里 `ESBUILD=./node_modules/.bin/esbuild` 是必须的：`tools/esbuild.exe`
-  是 Windows 二进制，Linux runner 上跑不了。
-
-几个注意点：
-
-- 免费账号的 Pages **只能发布公开仓库**；私有仓库要 Pro 及以上。
-- `dist/` 里另有 `README.txt`、`start-demo.bat`、`.nojekyll`，一起发上去无害；
-  `.bat` 只在 Windows 本地双击时有用。
-- 首屏要下 4.19 MB（three.js 826 KB + 立绘 3358 KB 都内联在里面），移动网络慢的话
-  第一次打开会等一会儿；之后走 CDN 缓存。
-- 页面不发任何网络请求，所以不存在 CORS、混合内容、Service Worker 之类的坑；
-  换 `?quality=lite` 也照常生效（它只是运行时降低行人/车辆数量，不影响下载体积）。
 
 ## 操作
 
