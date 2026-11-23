@@ -143,8 +143,11 @@
     font-size: 14px; line-height: 1.9; white-space: pre-line; color: #eef4ff;
     text-shadow: 0 1px 12px rgba(0,0,0,.6);
   }
-  .talk-options { margin-top: 12px; display: grid; gap: 6px; opacity: 0; transition: opacity .18s; }
-  .talk-options.in { opacity: 1; }
+  /* Choices stay unclickable until the line has finished revealing: they are laid out
+     (so the card does not jump) but transparent, and a click meant to skip the typing
+     must not land on an option the player cannot read yet. */
+  .talk-options { margin-top: 12px; display: grid; gap: 6px; opacity: 0; pointer-events: none; transition: opacity .18s; }
+  .talk-options.in { opacity: 1; pointer-events: auto; }
   .talk-options button {
     display: flex; align-items: center; gap: 10px;
     width: 100%; padding: 9px 12px; text-align: left;
