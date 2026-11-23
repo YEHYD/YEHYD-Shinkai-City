@@ -169,7 +169,7 @@ async function start() {
   }
 
   // ---------------------------------------------------------------- extras
-  const crowd = createCrowd(sprites, { quality });
+  const crowd = createCrowd(sprites, { quality, props: layout.props, npcs: NPCS });
   scene.add(crowd.group);
 
   const traffic = createTraffic({ quality });

@@ -156,6 +156,67 @@ export function createCrowd(sprites, opts = {}) {
     }
   }
 
+  // ---------------------------------------------------------------- street furniture
+  // A lane is only a line, so a vending machine, a pole or a tree that happens to stand on
+  // that line gets walked straight through — you see half a passer-by sticking out of a
+  // machine as the camera comes round the corner. Collect the furniture once into a coarse
+  // grid and shove each walker out of whatever it is standing in; the push is radial, so
+  // people slide round a tree instead of stopping dead against it.
+  const OBSTACLE_R = { vending: 0.62, poles: 0.26, signals: 0.30, benches: 0.72 };
+  const GRID = 6;
+  const furniture = new Map();
+  const addFurniture = (x, z, r) => {
+    const key = `${Math.floor(x / GRID)}|${Math.floor(z / GRID)}`;
+    let list = furniture.get(key);
+    if (!list) { list = []; furniture.set(key, list); }
+    list.push({ x, z, r });
+  };
+  {
+    const p = opts.props || {};
+    for (const v of p.vending || []) addFurniture(v.x, v.z, OBSTACLE_R.vending);
+    for (const v of p.poles || []) addFurniture(v.x, v.z, OBSTACLE_R.poles);
+    for (const v of p.signals || []) addFurniture(v.x, v.z, OBSTACLE_R.signals);
+    for (const v of p.benches || []) addFurniture(v.x, v.z, OBSTACLE_R.benches);
+    for (const v of p.trees || []) addFurniture(v.x, v.z, v.kind === 'bush' ? 0.50 : 0.52);
+    // the named characters stand still for minutes at a time — a passer-by walking through
+    // one of them is the most obvious glitch of the lot
+    for (const n of opts.npcs || []) addFurniture(n.x, n.z, 0.58);
+  }
+  const BODY_R = 0.34;   // half a shoulder
+  const KERB_LIMIT = 6.55; // never let a push shove someone into the traffic
+
+  function clearOfFurniture(w) {
+    let px = w.x, pz = w.z;
+    const gx = Math.floor(px / GRID), gz = Math.floor(pz / GRID);
+    for (let pass = 0; pass < 2; pass++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const list = furniture.get(`${gx + dx}|${gz + dz}`);
+          if (!list) continue;
+          for (const o of list) {
+            const ox = px - o.x, oz = pz - o.z;
+            const need = o.r + BODY_R;
+            const d2 = ox * ox + oz * oz;
+            if (d2 >= need * need) continue;
+            const d = Math.sqrt(d2) || 0.0001;
+            const push = (need - d) / d;
+            px += ox * push;
+            pz += oz * push;
+          }
+        }
+      }
+    }
+    // clamp the lateral offset so nobody ends up standing in a lane of traffic
+    const lat = w.lane.axis === 'z' ? px - w.lane.road : pz - w.lane.road;
+    if (Math.abs(lat) < KERB_LIMIT) {
+      const sign = lat >= 0 ? 1 : -1;
+      if (w.lane.axis === 'z') px = w.lane.road + sign * KERB_LIMIT;
+      else pz = w.lane.road + sign * KERB_LIMIT;
+    }
+    w.x = px;
+    w.z = pz;
+  }
+
   return {
     group,
     walkers,
@@ -176,6 +237,7 @@ export function createCrowd(sprites, opts = {}) {
           else if (w.t < -HALF + 6) { w.t = -HALF + 6; w.dir = 1; }
         }
         place(w);
+        clearOfFurniture(w);
 
         // --- facing: along the lane, or wherever an idle one happens to be looking
         if (!w.idle) {
