@@ -79,6 +79,34 @@
   #focus .who { color: #ffe3b8; }
   #focus .act { color: var(--dim); margin-left: 8px; font-size: 11px; }
 
+  /* ---------- pause, shown when the pointer lock is released ---------- */
+  #pause {
+    position: fixed; inset: 0; z-index: 45; display: grid; place-items: center;
+    background: rgba(8, 10, 16, 0.42); backdrop-filter: blur(7px) saturate(0.8);
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+    cursor: pointer;
+  }
+  #pause.on { opacity: 1; pointer-events: auto; }
+  #pause .card {
+    text-align: center; padding: 26px 44px; border: 1px solid var(--line);
+    border-radius: 10px; background: rgba(12, 16, 24, 0.72);
+  }
+  #pause .t { font-size: 19px; letter-spacing: .34em; color: var(--ink); }
+  #pause .s { margin-top: 10px; font-size: 11.5px; letter-spacing: .05em; color: var(--dim); }
+  #pause kbd {
+    font: inherit; padding: 1px 5px; border: 1px solid var(--line);
+    border-radius: 3px; background: var(--panel); color: var(--ink);
+  }
+
+  /* a small dot, only while the pointer is captured */
+  #reticle {
+    position: fixed; z-index: 20; left: 50%; top: 50%; width: 4px; height: 4px;
+    margin: -2px 0 0 -2px; border-radius: 50%;
+    background: rgba(255, 244, 226, 0.55); box-shadow: 0 0 6px rgba(255, 226, 190, 0.5);
+    opacity: 0; transition: opacity .2s; pointer-events: none;
+  }
+  #reticle.on { opacity: 1; }
+
   /* ---------- conversation ---------- */
   #talk {
     position: fixed; inset: auto 0 0 0; z-index: 30;
@@ -106,6 +134,10 @@
   .talk-name { font-size: 15px; letter-spacing: .18em; color: var(--accent, #ffe3b8); }
   .talk-name span { margin-left: 10px; font-size: 11px; letter-spacing: .12em; color: var(--dim); }
   .talk-name span::before { content: '· '; }
+  .talk-name .talk-round {
+    float: right; font-style: normal; font-size: 10px; letter-spacing: .16em;
+    color: var(--dim); opacity: .7;
+  }
   .talk-text {
     margin-top: 9px; min-height: 62px;
     font-size: 14px; line-height: 1.9; white-space: pre-line; color: #eef4ff;
@@ -217,9 +249,9 @@
 
 <div id="hint" class="hud">
   <kbd>W A S D</kbd> 移动 &nbsp;·&nbsp; <kbd>Shift</kbd> 跑 &nbsp;·&nbsp;
-  <kbd>拖动</kbd> 环视 &nbsp;·&nbsp; <kbd>滚轮</kbd> 远近 &nbsp;·&nbsp;
+  <kbd>鼠标</kbd> 转视角 &nbsp;·&nbsp; <kbd>滚轮</kbd> 远近 &nbsp;·&nbsp;
   <kbd>E</kbd> 交谈 &nbsp;·&nbsp; <kbd>V</kbd> 俯瞰 &nbsp;·&nbsp; <kbd>M</kbd> 地图 &nbsp;·&nbsp;
-  <kbd>[</kbd> <kbd>]</kbd> 调时间
+  <kbd>[</kbd> <kbd>]</kbd> 调时间 &nbsp;·&nbsp; <kbd>Esc</kbd> 暂停
 </div>
 
 <div id="feed" class="hud"></div>
@@ -236,6 +268,15 @@
   <div class="sub" id="bootmsg">正在建造城市</div>
   <div id="bar"><i></i></div>
 </div>
+
+<div id="pause">
+  <div class="card">
+    <div class="t">已暂停</div>
+    <div class="s">鼠标已交还。点任意处继续，<kbd>Esc</kbd> 再暂停。</div>
+  </div>
+</div>
+
+<div id="reticle"></div>
 
 <script type="module" src="./src/main.js"></script>
 </body>

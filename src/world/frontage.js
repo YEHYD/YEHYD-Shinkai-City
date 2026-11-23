@@ -158,7 +158,7 @@ export function buildFrontage(layout, { quality = 'full' } = {}) {
   }
 
   // ---------------------------------------------------------------- vending machines
-  const props = layout.props || { vending: [], poles: [], wires: [], signals: [], benches: [] };
+  const props = layout.props || { vending: [], poles: [], wires: [], signals: [], benches: [], trees: [] };
   for (const v of props.vending) {
     const body = new THREE.BoxGeometry(0.92, 1.86, 0.72);
     paint(body, rnd.pick(['#c8ccd2', '#2c3440', '#8f2f2c', '#2a4d78']));
@@ -243,6 +243,129 @@ export function buildFrontage(layout, { quality = 'full' } = {}) {
       benchGeo.push(shade(bch.yaw, bch.x, 0, bch.z, leg));
     }
   }
+
+  // ---------------------------------------------------------------- greenery
+  // Street trees stand on the kerb line, bushes fill the plaza edges, and the towers
+  // carry planters out on their balconies. Two instanced meshes carry all of it: a trunk
+  // and a set of leaf lobes, so a few hundred plants cost two draw calls.
+  const streetTrees = (props.trees || []).filter(t => t.kind === 'street');
+  const plazaBushes = (props.trees || []).filter(t => t.kind === 'bush');
+
+  const trunkGeo = new THREE.CylinderGeometry(0.12, 0.21, 2.4, 6);
+  trunkGeo.translate(0, 1.2, 0);
+  const leafGeo = merge([
+    new THREE.IcosahedronGeometry(1.35, 0).translate(0, 2.95, 0),
+    new THREE.IcosahedronGeometry(1.02, 0).translate(0.78, 2.42, 0.34),
+    new THREE.IcosahedronGeometry(0.92, 0).translate(-0.68, 2.52, -0.36),
+    new THREE.IcosahedronGeometry(0.86, 0).translate(0.12, 2.22, -0.64)
+  ], 'leaf-lobes');
+  const bushGeo = merge([
+    new THREE.IcosahedronGeometry(0.62, 0).translate(0, 0.5, 0),
+    new THREE.IcosahedronGeometry(0.46, 0).translate(0.52, 0.36, 0.18),
+    new THREE.IcosahedronGeometry(0.42, 0).translate(-0.44, 0.34, -0.2)
+  ], 'bush-lobes');
+
+  // --- balcony planters: one row per occupied floor, on the street faces of tall blocks
+  // Skipped entirely on the lite profile: they are the single biggest instance count in the
+  // greenery pass (632 boxes + 632 leaf clumps) and read as small green smudges at phone
+  // distance, which is exactly where lite lives.
+  const balconySpots = [];
+  for (const b of (quality === 'lite' ? [] : layout.buildings)) {
+    if (b.h < 16) continue;
+    for (const face of (b.faces || [])) {
+      const { cx, cz, len, yaw } = face;
+      const { nx, nz, lx, lz } = faceAxes(yaw);
+      const floors = Math.min(3, Math.floor((Math.min(b.h, 26) - 5) / 3.2));
+      for (let f = 0; f < floors; f++) {
+        if (!rnd.chance(0.55)) continue;
+        if (len < 4) continue;
+        const y = 4.8 + f * 3.2;
+        const s = rnd.range(-len / 2 + 1.0, len / 2 - 1.0);
+        balconySpots.push({
+          x: cx + lx * s + nx * 0.5,
+          y,
+          z: cz + lz * s + nz * 0.5,
+          yaw,
+          scale: rnd.range(0.34, 0.52)
+        });
+      }
+    }
+  }
+
+  const LEAF_TINT = ['#3d6b45', '#4a7a4e', '#33573c', '#588a5c', '#2f4f36'];
+  const UP = new THREE.Vector3(0, 1, 0);
+  const mtx = new THREE.Matrix4();
+  const quat = new THREE.Quaternion();
+  const vec = new THREE.Vector3();
+  const scl = new THREE.Vector3();
+  const tint = new THREE.Color();
+
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4b3b2d, roughness: 0.92, metalness: 0.02 });
+  const leafMat = new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0.02, flatShading: true });
+  const planterMat = new THREE.MeshStandardMaterial({ color: 0x6d6a63, roughness: 0.88, metalness: 0.04 });
+
+  const trunkMesh = new THREE.InstancedMesh(trunkGeo, trunkMat, Math.max(1, streetTrees.length));
+  trunkMesh.name = 'tree-trunks';
+  trunkMesh.castShadow = true;
+
+  const leafTotal = streetTrees.length + plazaBushes.length + balconySpots.length;
+  const leafMesh = new THREE.InstancedMesh(leafGeo, leafMat, Math.max(1, leafTotal));
+  leafMesh.name = 'tree-leaves';
+  leafMesh.castShadow = true;
+
+  const bushMesh = new THREE.InstancedMesh(bushGeo, leafMat, Math.max(1, plazaBushes.length));
+  bushMesh.name = 'plaza-bushes';
+  bushMesh.castShadow = true;
+
+  const planterMesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(1.02, 0.2, 0.34),
+    planterMat,
+    Math.max(1, balconySpots.length)
+  );
+  planterMesh.name = 'balcony-planters';
+  planterMesh.castShadow = true;
+
+  let li = 0;
+  streetTrees.forEach((t, i) => {
+    const s = t.scale ?? 1;
+    quat.setFromAxisAngle(UP, (t.seed ?? 0.5) * Math.PI * 2);
+    mtx.compose(vec.set(t.x, 0, t.z), quat, scl.set(s, s, s));
+    trunkMesh.setMatrixAt(i, mtx);
+    leafMesh.setMatrixAt(li, mtx);
+    leafMesh.setColorAt(li, tint.set(LEAF_TINT[i % LEAF_TINT.length]));
+    li++;
+  });
+  trunkMesh.count = streetTrees.length;
+
+  plazaBushes.forEach((b, i) => {
+    const s = (b.scale ?? 1) * 0.95;
+    quat.setFromAxisAngle(UP, (b.seed ?? 0.4) * Math.PI * 2);
+    mtx.compose(vec.set(b.x, 0, b.z), quat, scl.set(s, s, s));
+    bushMesh.setMatrixAt(i, mtx);
+    bushMesh.setColorAt(i, tint.set(LEAF_TINT[(i + 2) % LEAF_TINT.length]));
+  });
+  bushMesh.count = plazaBushes.length;
+
+  balconySpots.forEach((p, i) => {
+    const s = p.scale;
+    quat.setFromAxisAngle(UP, p.yaw);
+    mtx.compose(vec.set(p.x, p.y, p.z), quat, scl.set(s, s, s));
+    leafMesh.setMatrixAt(li, mtx);
+    leafMesh.setColorAt(li, tint.set(LEAF_TINT[(i + 1) % LEAF_TINT.length]));
+    li++;
+    mtx.compose(vec.set(p.x, p.y - 0.18, p.z), quat, scl.set(1, 1, 1));
+    planterMesh.setMatrixAt(i, mtx);
+  });
+  leafMesh.count = li;
+  planterMesh.count = balconySpots.length;
+
+  for (const m of [trunkMesh, leafMesh, bushMesh, planterMesh]) {
+    m.instanceMatrix.needsUpdate = true;
+    m.frustumCulled = false;
+    group.add(m);
+  }
+  if (leafMesh.instanceColor) leafMesh.instanceColor.needsUpdate = true;
+  if (bushMesh.instanceColor) bushMesh.instanceColor.needsUpdate = true;
 
   // ---------------------------------------------------------------- materials
   const shopTex = shopAtlas();

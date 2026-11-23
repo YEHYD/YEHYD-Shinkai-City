@@ -25,188 +25,645 @@ function toTexture(c, { repeat = 1, srgb = true, aniso = 8 } = {}) {
   return t;
 }
 
-// ---------------------------------------------------------------- building facades
-// A facade tile holds `COLS x ROWS` window bays. It comes as a matched pair: the albedo
-// (wall + glass) and the emissive (only the lit windows), drawn from the same seed so
-// the glow lands exactly on the glass.
+// ---------------------------------------------------------------- noise
+// Seamless value noise on the unit square: the lattice wraps, so a map sampled with
+// RepeatWrapping has no visible seam. Every surface below is built from these.
 
-const COLS = 6, ROWS = 6, TILE = 256;
-
-function facadePair(seed) {
+function valueNoise(cells, seed) {
   const rnd = makeRandom(seed);
-  const wall = rnd.pick(['#5b6472', '#6b6560', '#59616e', '#6f6a70', '#565d69', '#77726c']);
-  const glass = '#232c3a';
-  const lit = [];   // [x, y, w, h, colour]
-  const bays = [];
-
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      // Window bay geometry inside a cell of the tile.
-      const cw = TILE / COLS, ch = TILE / ROWS;
-      const x = c * cw + cw * 0.16;
-      const y = r * ch + ch * 0.20;
-      const w = cw * 0.68;
-      const h = ch * 0.54;
-      const isLit = rnd.chance(0.42);
-      bays.push([x, y, w, h, isLit]);
-      if (isLit) {
-        const tint = rnd.pick(['#ffe4b0', '#fff2d2', '#ffd08a', '#dce7ff', '#bfe2ff', '#ffc98a']);
-        lit.push([x, y, w, h, tint, rnd.range(0.55, 1)]);
-      }
-    }
-  }
-
-  const albedo = canvas(TILE, (ctx, S) => {
-    ctx.fillStyle = wall;
-    ctx.fillRect(0, 0, S, S);
-    // faint vertical mullions + floor slabs
-    ctx.fillStyle = 'rgba(0,0,0,.10)';
-    for (let c = 0; c <= COLS; c++) ctx.fillRect(Math.round(c * S / COLS) - 1, 0, 2, S);
-    for (let r = 0; r <= ROWS; r++) ctx.fillRect(0, Math.round(r * S / ROWS) - 1, S, 2);
-    for (const [x, y, w, h, isLit] of bays) {
-      ctx.fillStyle = isLit ? 'rgba(255,240,210,.82)' : glass;
-      ctx.fillRect(x, y, w, h);
-      ctx.strokeStyle = 'rgba(0,0,0,.34)';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(x, y, w, h);
-    }
-    // grime gradient so the tile does not read as flat
-    const g = ctx.createLinearGradient(0, 0, 0, S);
-    g.addColorStop(0, 'rgba(255,255,255,.07)');
-    g.addColorStop(.55, 'rgba(0,0,0,0)');
-    g.addColorStop(1, 'rgba(0,0,0,.16)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, S, S);
-  });
-
-  const emissive = canvas(TILE, (ctx, S) => {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, S, S);
-    for (const [x, y, w, h, tint, a] of lit) {
-      ctx.globalAlpha = a;
-      ctx.fillStyle = tint;
-      ctx.fillRect(x, y, w, h);
-    }
-    ctx.globalAlpha = 1;
-  });
-
-  return { albedo, emissive };
+  const g = new Float32Array(cells * cells);
+  for (let i = 0; i < g.length; i++) g[i] = rnd.next();
+  const wrap = n => ((n % cells) + cells) % cells;
+  const at = (i, j) => g[wrap(j) * cells + wrap(i)];
+  return (u, v) => {
+    const x = u * cells, y = v * cells;
+    const x0 = Math.floor(x), y0 = Math.floor(y);
+    const fx = x - x0, fy = y - y0;
+    const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+    const a = at(x0, y0), b = at(x0 + 1, y0), c = at(x0, y0 + 1), d = at(x0 + 1, y0 + 1);
+    const top = a + (b - a) * sx;
+    const bot = c + (d - c) * sx;
+    return top + (bot - top) * sy;
+  };
 }
 
-/** @returns {{map: THREE.Texture, emissiveMap: THREE.Texture}} */
-export function facadeTextures(variant = 0) {
-  const key = `facade${variant}`;
+const gray = v => {
+  const n = Math.max(0, Math.min(255, Math.round(v)));
+  return `rgb(${n},${n},${n})`;
+};
+
+// ---------------------------------------------------------------- building facades
+// A facade tile holds COLS x ROWS bays and ships as a matched set of four maps:
+//   albedo     wall, frames, glass, sills, grime
+//   emissive   only the lit bays, so the glow lands exactly on the glass
+//   bump       glass recessed, frames and sills proud (grey = height)
+//   roughness  glass smooth, render rough, so sunsets roll off the towers
+// Four styles, picked by height in city.js, keep the skyline from reading as one material.
+
+const COLS = 6, ROWS = 6, TILE = 512;
+
+const STYLES = {
+  concrete: {
+    wall: '#8b8679', glass: '#1d2732', frame: '#b3ae9f',
+    lit: ['#ffdda2', '#ffeccb', '#cfe0ff'], litChance: 0.32,
+    bay: 'window', balcony: 0.28, ac: 0.24
+  },
+  curtain: {
+    wall: '#454f5c', glass: '#0f171f', frame: '#6d7581', spandrel: '#29313a',
+    lit: ['#ffeccd', '#dde9ff', '#bfd6ff'], litChance: 0.20,
+    bay: 'glass', balcony: 0, ac: 0
+  },
+  ribbon: {
+    wall: '#9b9080', glass: '#19222b', frame: '#bdb3a0', spandrel: '#6e6659',
+    lit: ['#fff1cf', '#ffe3b3', '#d7e7ff'], litChance: 0.38,
+    bay: 'band', balcony: 0.10, ac: 0.08
+  },
+  brick: {
+    wall: '#8a6050', glass: '#20272d', frame: '#d6cdbe',
+    lit: ['#ffd79a', '#ffe8bf', '#e6d1ff'], litChance: 0.30,
+    bay: 'window', balcony: 0.38, ac: 0.14, brick: true
+  }
+};
+
+export const FACADE_STYLES = ['concrete', 'curtain', 'ribbon', 'brick'];
+export const FACADE_VARIANTS = FACADE_STYLES.length;
+
+/** Which style a building should wear. Glass towers, ribbon offices, masonry low-rise. */
+export function styleForBuilding(b) {
+  if (b.h > 62) return 1;                    // curtain wall
+  if (b.h > 30) return 2;                    // ribbon office
+  return b.variant % 2 ? 3 : 0;              // brick / concrete walk-ups
+}
+
+function facadeBays(style, seed) {
+  const rnd = makeRandom(seed);
+  const cw = TILE / COLS, ch = TILE / ROWS;
+  const bays = [];
+  for (let r = 0; r < ROWS; r++) {
+    const floorLit = rnd.chance(style.bay === 'band' ? 0.16 : 0.06);
+    for (let c = 0; c < COLS; c++) {
+      bays.push({
+        c, r, cw, ch, x: c * cw, y: r * ch,
+        lit: rnd.chance(style.litChance) || (floorLit && rnd.chance(0.7)),
+        tint: rnd.pick(style.lit),
+        glow: rnd.range(0.5, 1),
+        balcony: rnd.chance(style.balcony),
+        ac: rnd.chance(style.ac),
+        split: style.bay === 'window' && rnd.chance(0.2),
+        blind: rnd.chance(0.3),
+        grime: rnd.chance(0.24)
+      });
+    }
+  }
+  return bays;
+}
+
+/** Glass rectangles of one bay, in tile pixels. */
+function panesOf(style, b) {
+  const { x, y, cw, ch } = b;
+  if (style.bay === 'glass') return [[x + cw * 0.05, y + ch * 0.06, cw * 0.90, ch * 0.72]];
+  if (style.bay === 'band') return [[x, y + ch * 0.30, cw, ch * 0.42]];
+  if (b.split) {
+    const w = cw * 0.24, py = ch * 0.24, ph = ch * 0.40;
+    return [[x + cw * 0.11, y + py, w, ph], [x + cw * 0.62, y + py, w, ph]];
+  }
+  return [[x + cw * 0.20, y + ch * 0.24, cw * 0.60, ch * 0.40]];
+}
+
+function facadePair(style, seed) {
+  const rnd = makeRandom(seed);
+  const bays = facadeBays(style, seed);
+  const S = TILE;
+  const spandrel = style.spandrel || style.glass;
+
+  // ---- albedo -------------------------------------------------------------
+  const albedo = canvas(S, (ctx) => {
+    ctx.fillStyle = style.wall;
+    ctx.fillRect(0, 0, S, S);
+
+    // break up the render so an 18 m tile does not read as one flat panel
+    for (let i = 0; i < 2200; i++) {
+      const white = rnd.chance(0.5);
+      ctx.fillStyle = `rgba(${white ? '255,255,255' : '0,0,0'},${rnd.range(0.012, 0.05)})`;
+      ctx.fillRect(rnd.range(0, S), rnd.range(0, S), rnd.range(2, 20), rnd.range(2, 9));
+    }
+
+    if (style.brick) {
+      const bh = S / 26;
+      for (let row = 0; row * bh < S; row++) {
+        ctx.fillStyle = 'rgba(38,24,18,.26)';
+        ctx.fillRect(0, row * bh, S, 1.5);
+        const off = (row % 2) * bh * 1.1;
+        for (let x = off; x < S; x += bh * 2.2) ctx.fillRect(x, row * bh, 1.5, bh);
+      }
+    }
+
+    // floor slabs: shadow under each floor line, thin highlight above it
+    for (let r = 0; r <= ROWS; r++) {
+      const y = Math.round(r * S / ROWS);
+      ctx.fillStyle = 'rgba(0,0,0,.20)';
+      ctx.fillRect(0, y - 2, S, 3);
+      ctx.fillStyle = 'rgba(255,255,255,.05)';
+      ctx.fillRect(0, y + 1, S, 1);
+    }
+    // vertical pilasters at bay edges
+    ctx.fillStyle = 'rgba(255,255,255,.045)';
+    for (let c = 1; c < COLS; c++) ctx.fillRect(Math.round(c * S / COLS) - 1, 0, 2, S);
+
+    for (const b of bays) {
+      const frame = style.bay === 'band' ? 2 : 3;
+
+      if (style.bay === 'band') {
+        // continuous ribbon: spandrel band behind the glass strip
+        ctx.fillStyle = spandrel;
+        ctx.fillRect(b.x, b.y + b.ch * 0.16, b.cw, b.ch * 0.68);
+      }
+
+      for (const [gx, gy, gw, gh] of panesOf(style, b)) {
+        // recess shadow + frame
+        ctx.fillStyle = 'rgba(0,0,0,.40)';
+        ctx.fillRect(gx - frame, gy - frame, gw + frame * 2, gh + frame * 2);
+        ctx.fillStyle = style.frame;
+        ctx.fillRect(gx - frame, gy - frame, gw + frame * 2, frame);
+        ctx.fillRect(gx - frame, gy + gh, gw + frame * 2, frame);
+        ctx.fillRect(gx - frame, gy - frame, frame, gh + frame * 2);
+        ctx.fillRect(gx + gw, gy - frame, frame, gh + frame * 2);
+
+        // glass, with the sky reflected down the top third
+        ctx.fillStyle = style.glass;
+        ctx.fillRect(gx, gy, gw, gh);
+        const refl = ctx.createLinearGradient(gx, gy, gx, gy + gh);
+        refl.addColorStop(0, 'rgba(150,178,205,.34)');
+        refl.addColorStop(0.45, 'rgba(26,36,46,0)');
+        ctx.fillStyle = refl;
+        ctx.fillRect(gx, gy, gw, gh);
+
+        if (b.lit) {
+          ctx.globalAlpha = 0.46 * b.glow;
+          ctx.fillStyle = b.tint;
+          ctx.fillRect(gx, gy, gw, gh);
+          ctx.globalAlpha = 1;
+        }
+        if (b.blind) {
+          ctx.fillStyle = 'rgba(236,232,220,.20)';
+          ctx.fillRect(gx, gy, gw, gh * 0.34);
+        }
+
+        // mullion + transom
+        ctx.globalAlpha = 0.5;
+        ctx.fillStyle = style.frame;
+        ctx.fillRect(Math.round(gx + gw / 2) - 1, gy, 2, gh);
+        if (gh > 30) ctx.fillRect(gx, Math.round(gy + gh * 0.36), gw, 1.5);
+        ctx.globalAlpha = 1;
+
+        // sill highlight catches the low sun
+        ctx.fillStyle = 'rgba(255,255,255,.20)';
+        ctx.fillRect(gx - frame, gy + gh + frame, gw + frame * 2, 1.5);
+      }
+
+      if (b.balcony) {
+        const by = b.y + b.ch * 0.70, bh = b.ch * 0.14;
+        ctx.fillStyle = 'rgba(250,248,244,.13)';
+        ctx.fillRect(b.x + 2, by, b.cw - 4, bh);
+        ctx.fillStyle = 'rgba(0,0,0,.30)';
+        ctx.fillRect(b.x + 2, by + bh, b.cw - 4, 3);
+        ctx.fillStyle = 'rgba(206,210,216,.5)';
+        for (let i = 0; i <= 8; i++) {
+          ctx.fillRect(b.x + 4 + i * ((b.cw - 8) / 8), by - bh * 1.4, 1.5, bh * 1.4);
+        }
+        ctx.fillRect(b.x + 4, by - bh * 1.4, b.cw - 8, 2);
+      } else if (b.ac) {
+        const aw = b.cw * 0.26, ah = aw * 0.62;
+        const ax = b.x + b.cw * 0.5 - aw / 2, ay = b.y + b.ch * 0.70;
+        ctx.fillStyle = '#9aa0a6';
+        ctx.fillRect(ax, ay, aw, ah);
+        ctx.fillStyle = 'rgba(0,0,0,.34)';
+        for (let i = 1; i < 5; i++) ctx.fillRect(ax + 2, ay + (i * ah) / 5, aw - 4, 1);
+        ctx.fillRect(ax, ay + ah, aw, 2);
+      }
+
+      if (b.grime) {
+        const g = ctx.createLinearGradient(0, b.y + b.ch * 0.60, 0, b.y + b.ch);
+        g.addColorStop(0, 'rgba(18,20,24,.20)');
+        g.addColorStop(1, 'rgba(18,20,24,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(b.x + b.cw * 0.28, b.y + b.ch * 0.60, b.cw * 0.16, b.ch * 0.40);
+      }
+    }
+  });
+
+  // ---- emissive -----------------------------------------------------------
+  const emissive = canvas(S, (ctx) => {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, S, S);
+    for (const b of bays) {
+      if (!b.lit) continue;
+      for (const [gx, gy, gw, gh] of panesOf(style, b)) {
+        ctx.save();
+        ctx.shadowColor = b.tint;
+        ctx.shadowBlur = 16;
+        ctx.globalAlpha = 0.55 + 0.45 * b.glow;
+        ctx.fillStyle = b.tint;
+        ctx.fillRect(gx, gy, gw, gh);
+        ctx.restore();
+        // furniture / figure silhouette keeps lit rooms from reading as flat cards
+        ctx.fillStyle = 'rgba(0,0,0,.30)';
+        ctx.fillRect(gx, gy + gh * 0.62, gw, gh * 0.38);
+        if (b.blind) {
+          ctx.fillStyle = 'rgba(255,255,255,.45)';
+          for (let i = 0; i < 7; i++) ctx.fillRect(gx, gy + (i * gh) / 7, gw, 1.2);
+        }
+      }
+    }
+  });
+
+  // ---- bump ---------------------------------------------------------------
+  const bump = canvas(S, (ctx) => {
+    ctx.fillStyle = gray(124);
+    ctx.fillRect(0, 0, S, S);
+
+    if (style.brick) {
+      ctx.fillStyle = gray(96);
+      for (let row = 0; row * (S / 26) < S; row++) ctx.fillRect(0, row * (S / 26), S, 2);
+    }
+    for (let i = 0; i < 1200; i++) {
+      ctx.fillStyle = gray(124 + rnd.range(-18, 18));
+      ctx.fillRect(rnd.range(0, S), rnd.range(0, S), rnd.range(2, 12), rnd.range(2, 8));
+    }
+    for (let r = 0; r <= ROWS; r++) {
+      ctx.fillStyle = gray(98);
+      ctx.fillRect(0, Math.round(r * S / ROWS) - 2, S, 3);
+    }
+    for (const b of bays) {
+      const frame = style.bay === 'band' ? 2 : 3;
+      for (const [gx, gy, gw, gh] of panesOf(style, b)) {
+        ctx.fillStyle = gray(58);                       // glass sits back
+        ctx.fillRect(gx, gy, gw, gh);
+        ctx.fillStyle = gray(196);                      // frames stand proud
+        ctx.fillRect(gx - frame, gy - frame, gw + frame * 2, frame);
+        ctx.fillRect(gx - frame, gy + gh, gw + frame * 2, frame);
+        ctx.fillRect(gx - frame, gy - frame, frame, gh + frame * 2);
+        ctx.fillRect(gx + gw, gy - frame, frame, gh + frame * 2);
+        ctx.fillStyle = gray(218);                      // sill lip
+        ctx.fillRect(gx - frame, gy + gh + frame, gw + frame * 2, 2);
+      }
+      if (b.balcony) {
+        const by = b.y + b.ch * 0.70, bh = b.ch * 0.14;
+        ctx.fillStyle = gray(206);
+        ctx.fillRect(b.x + 2, by, b.cw - 4, bh);
+        ctx.fillStyle = gray(60);
+        ctx.fillRect(b.x + 2, by + bh, b.cw - 4, 3);
+      } else if (b.ac) {
+        ctx.fillStyle = gray(184);
+        ctx.fillRect(b.x + b.cw * 0.37, b.y + b.ch * 0.70, b.cw * 0.26, b.cw * 0.16);
+      }
+    }
+  });
+
+  // ---- roughness ----------------------------------------------------------
+  const rough = canvas(S, (ctx) => {
+    ctx.fillStyle = gray(212);
+    ctx.fillRect(0, 0, S, S);
+    for (let i = 0; i < 900; i++) {
+      ctx.fillStyle = gray(212 + rnd.range(-16, 16));
+      ctx.fillRect(rnd.range(0, S), rnd.range(0, S), rnd.range(3, 16), rnd.range(3, 12));
+    }
+    if (style.bay === 'band') {
+      ctx.fillStyle = gray(176);
+      for (const b of bays) ctx.fillRect(b.x, b.y + b.ch * 0.16, b.cw, b.ch * 0.68);
+    }
+    for (const b of bays) {
+      for (const [gx, gy, gw, gh] of panesOf(style, b)) {
+        ctx.fillStyle = gray(26);                       // glass is nearly a mirror
+        ctx.fillRect(gx, gy, gw, gh);
+      }
+      if (b.balcony) {
+        ctx.fillStyle = gray(168);
+        ctx.fillRect(b.x + 2, b.y + b.ch * 0.70, b.cw - 4, b.ch * 0.14);
+      }
+    }
+  });
+
+  return { albedo, emissive, bump, rough };
+}
+
+/** @returns {{map, emissiveMap, bumpMap, roughnessMap}} */
+export function facadeTextures(styleIndex = 0) {
+  const key = `facade${styleIndex}`;
   if (cache.has(key)) return cache.get(key);
-  const pair = facadePair(9001 + variant * 7919);
+  const name = FACADE_STYLES[styleIndex % FACADE_STYLES.length];
+  const set = facadePair(STYLES[name], 9001 + styleIndex * 7919);
   const out = {
-    map: toTexture(pair.albedo, { repeat: 1 }),
-    emissiveMap: toTexture(pair.emissive, { repeat: 1 })
+    map: toTexture(set.albedo, { repeat: 1 }),
+    emissiveMap: toTexture(set.emissive, { repeat: 1 }),
+    bumpMap: toTexture(set.bump, { repeat: 1, srgb: false }),
+    roughnessMap: toTexture(set.rough, { repeat: 1, srgb: false })
   };
   cache.set(key, out);
   return out;
 }
 
-export const FACADE_VARIANTS = 4;
-
 // ---------------------------------------------------------------- ground
 // One tile == one city cell, measured corner to corner between two road centre lines:
 //   |<-6m road->|<-3m walk->|<-30m block->|<-3m walk->|<-6m road->|
 // Roads sit on the tile's edges, so the tile repeats seamlessly across the grid.
+//
+// The tile ships as albedo + bump + roughness: wet asphalt needs a low roughness to
+// mirror the dusk sky, pavers need a high one, and the joints have to catch light or
+// the whole street reads as painted cardboard.
 
 export const GROUND_TILE_METERS = 48;
 
-export function groundTexture() {
-  const key = 'ground';
+export function groundMaps() {
+  const key = 'ground-maps';
   if (cache.has(key)) return cache.get(key);
 
   const S = 1024;
-  const px = S / GROUND_TILE_METERS;          // pixels per metre
+  const px = S / GROUND_TILE_METERS;
   const rnd = makeRandom(4242);
+  const road = 6 * px;                    // 6 m carriageway on every edge
+  const walk = 3 * px;                    // 3 m sidewalk
+  const lot0 = Math.round(road + walk);
+  const lot1 = S - lot0;
 
-  const c = canvas(S, (ctx) => {
-    // asphalt everywhere first
-    ctx.fillStyle = '#23272f';
-    ctx.fillRect(0, 0, S, S);
+  const grain = valueNoise(220, 11);
+  const broad = valueNoise(18, 17);
 
-    const road = 6 * px, walk = 3 * px, block = 30 * px;
+  // 0 asphalt, 1 sidewalk, 2 lot
+  const zoneAt = (mx, my) => {
+    const d = Math.min(Math.min(mx, GROUND_TILE_METERS - mx), Math.min(my, GROUND_TILE_METERS - my));
+    return d < 6 ? 0 : d < 9 ? 1 : 2;
+  };
 
-    // block slab: pavement + the buildable lot
-    for (const [ox, oy] of [[0, 0]]) {
-      ctx.fillStyle = '#7d828c';
-      ctx.fillRect(road, road, S - road * 2, S - road * 2);
-    }
-    // pavement tone variation
-    for (let i = 0; i < 2600; i++) {
-      const x = rnd.range(road, S - road), y = rnd.range(road, S - road);
-      ctx.fillStyle = `rgba(${rnd.int(90, 150)},${rnd.int(94, 152)},${rnd.int(100, 160)},${rnd.range(.03, .10)})`;
-      ctx.fillRect(x, y, rnd.range(3, 16), rnd.range(3, 16));
-    }
+  const puddles = [];
+  for (let i = 0; i < 9; i++) {
+    puddles.push({
+      x: rnd.range(0.04, 0.96) * S,
+      y: rnd.range(0.04, 0.96) * S,
+      rx: rnd.range(0.02, 0.075) * S,
+      ry: rnd.range(0.012, 0.045) * S
+    });
+  }
 
-    // curb ring
-    ctx.strokeStyle = '#5d626b';
-    ctx.lineWidth = px * 0.5;
-    ctx.strokeRect(road, road, S - road * 2, S - road * 2);
+  // ---- albedo -------------------------------------------------------------
+  const albedo = document.createElement('canvas');
+  albedo.width = albedo.height = S;
+  const a = albedo.getContext('2d', { willReadFrequently: true });
 
-    // inner lot paving (buildings stand here)
-    ctx.fillStyle = '#6a6f79';
-    ctx.fillRect(road + walk, road + walk, block + walk * 0, S - (road + walk) * 2);
+  // Albedo is deliberately mid-grey, not "wet asphalt black": these are daytime surfaces,
+  // and the shadowing on a street between towers already costs two stops. Fresh-looking
+  // #25292f read as a black hole at 17:52 and only recovered after dark.
+  a.fillStyle = '#474e57';
+  a.fillRect(0, 0, S, S);
+  a.fillStyle = '#868b94';
+  a.fillRect(road, road, S - road * 2, S - road * 2);
+  a.fillStyle = '#747a83';
+  a.fillRect(lot0, lot0, lot1 - lot0, lot1 - lot0);
 
-    // lot seams
-    ctx.strokeStyle = 'rgba(40,44,52,.55)';
-    ctx.lineWidth = 2;
-    for (let i = 1; i < 5; i++) {
-      const p = road + walk + (S - (road + walk) * 2) * i / 5;
-      ctx.beginPath(); ctx.moveTo(p, road + walk); ctx.lineTo(p, S - road - walk); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(road + walk, p); ctx.lineTo(S - road - walk, p); ctx.stroke();
-    }
-
-    // asphalt speckle
-    for (let i = 0; i < 5200; i++) {
-      const onEdgeX = rnd.chance(0.5);
-      const x = onEdgeX ? (rnd.chance(.5) ? rnd.range(0, road) : rnd.range(S - road, S)) : rnd.range(0, S);
-      const y = onEdgeX ? rnd.range(0, S) : (rnd.chance(.5) ? rnd.range(0, road) : rnd.range(S - road, S));
-      const v = rnd.int(28, 66);
-      ctx.fillStyle = `rgba(${v},${v + 3},${v + 8},${rnd.range(.15, .5)})`;
-      ctx.fillRect(x, y, rnd.range(1, 4), rnd.range(1, 4));
-    }
-
-    // ---- lane markings: centre line runs along each edge, lane edges 5m inside
-    ctx.fillStyle = 'rgba(226,220,196,.72)';
-    const dash = px * 3, gap = px * 3;
-    const drawDashed = (vertical, at) => {
-      for (let p = 0; p < S; p += dash + gap) {
-        if (vertical) ctx.fillRect(at - px * 0.1, p, px * 0.2, dash);
-        else ctx.fillRect(p, at - px * 0.1, dash, px * 0.2);
-      }
-    };
-    // The centre double line sits on the tile border; draw both halves so it survives tiling.
-    ctx.fillStyle = 'rgba(230,226,200,.55)';
-    drawDashed(true, 0); drawDashed(true, S);
-    drawDashed(false, 0); drawDashed(false, S);
-
-    // solid lane edges at +/-5m from the centre line
-    ctx.fillStyle = 'rgba(224,222,206,.30)';
-    for (const at of [px * 5, S - px * 5]) {
-      ctx.fillRect(at - 1, 0, 2, S);
-      ctx.fillRect(0, at - 1, S, 2);
-    }
-
-    // crosswalk stripes at each corner, inside the road margins
-    ctx.fillStyle = 'rgba(232,230,214,.5)';
-    for (const [zx, zy] of [[0, 0], [S, 0], [0, S], [S, S]]) {
-      for (let i = 0; i < 5; i++) {
-        const off = (i - 2) * px * 1.1;
-        ctx.fillRect(zx - px * 1.2, clampEdge(zy + off, S), px * 2.4, px * 0.55);
-        ctx.fillRect(clampEdge(zx + off, S), zy - px * 1.2, px * 0.55, px * 2.4);
+  // mottle every pixel (sampled on a 2 px grid: the grain is finer than the eye reads)
+  {
+    const img = a.getImageData(0, 0, S, S);
+    const d = img.data;
+    for (let y = 0; y < S; y += 2) {
+      const my = y / px, v = y / S;
+      for (let x = 0; x < S; x += 2) {
+        const u = x / S;
+        const z = zoneAt(x / px, my);
+        const g = grain(u, v), b = broad(u, v);
+        const m = z === 0 ? 0.86 + 0.30 * b + 0.20 * g
+          : z === 1 ? 0.92 + 0.16 * g + 0.06 * b
+            : 0.90 + 0.15 * b + 0.09 * g;
+        for (let dy = 0; dy < 2; dy++) {
+          const row = ((y + dy) * S + x) * 4;
+          for (let dx = 0; dx < 2; dx++) {
+            const i = row + dx * 4;
+            d[i] = d[i] * m;
+            d[i + 1] = d[i + 1] * m;
+            d[i + 2] = d[i + 2] * m;
+          }
+        }
       }
     }
+    a.putImageData(img, 0, 0);
+  }
 
-    function clampEdge(v, max) { return Math.max(0, Math.min(max - px * 0.55, v)); }
-  });
+  // sidewalk pavers: 0.6 m squares with grouted joints, along all four bands of the ring
+  a.strokeStyle = 'rgba(34,38,44,.55)';
+  a.lineWidth = 1.4;
+  const paver = px * 0.6;
+  const ringA = road, ringD = S - road;
+  for (let d = 0; d <= walk; d += paver) {
+    // joints running along the street, inside the top and bottom bands
+    for (const y of [ringA + d, ringD - d]) {
+      a.beginPath(); a.moveTo(ringA, y); a.lineTo(ringD, y); a.stroke();
+    }
+    // joints running across it, inside the left and right bands
+    for (const x of [ringA + d, ringD - d]) {
+      a.beginPath(); a.moveTo(x, ringA); a.lineTo(x, ringD); a.stroke();
+    }
+  }
 
-  const t = toTexture(c, { repeat: 1 });
-  cache.set(key, t);
-  return t;
+  // curb: a pale stone edge, then the gutter stain that always sits beside it
+  a.strokeStyle = '#8d9199';
+  a.lineWidth = px * 0.34;
+  a.strokeRect(road, road, S - road * 2, S - road * 2);
+  a.strokeStyle = 'rgba(16,18,22,.34)';
+  a.lineWidth = px * 0.5;
+  a.strokeRect(road - px * 0.45, road - px * 0.45, S - road * 2 + px * 0.9, S - road * 2 + px * 0.9);
+
+  // lot slabs: 3 m cast panels
+  a.strokeStyle = 'rgba(30,34,40,.5)';
+  a.lineWidth = 2;
+  for (let p = lot0; p <= lot1; p += px * 3) {
+    a.beginPath(); a.moveTo(p, lot0); a.lineTo(p, lot1); a.stroke();
+    a.beginPath(); a.moveTo(lot0, p); a.lineTo(lot1, p); a.stroke();
+  }
+
+  // asphalt repairs: tar seams and a couple of patches
+  a.strokeStyle = 'rgba(12,14,18,.55)';
+  a.lineWidth = 2.5;
+  for (let i = 0; i < 7; i++) {
+    const y0 = rnd.range(0, S), x0 = rnd.range(0, S);
+    a.beginPath();
+    a.moveTo(x0, y0);
+    let x = x0, y = y0;
+    for (let k = 0; k < 6; k++) {
+      x += rnd.range(-40, 40);
+      y += rnd.range(-26, 26);
+      a.lineTo(x, y);
+    }
+    a.stroke();
+  }
+
+  // puddles: dark, cool, and they get a mirror-smooth roughness below
+  for (const p of puddles) {
+    const g = a.createRadialGradient(p.x, p.y, 0, p.x, p.y, Math.max(p.rx, p.ry));
+    g.addColorStop(0, 'rgba(28,38,52,.50)');
+    g.addColorStop(0.7, 'rgba(30,40,54,.30)');
+    g.addColorStop(1, 'rgba(34,44,58,0)');
+    a.fillStyle = g;
+    a.save();
+    a.translate(p.x, p.y);
+    a.scale(1, p.ry / p.rx);
+    a.beginPath(); a.arc(0, 0, p.rx, 0, TAU); a.fill();
+    a.restore();
+  }
+
+  // manhole covers
+  for (let i = 0; i < 3; i++) {
+    const cx = rnd.range(road * 1.5, S - road * 1.5);
+    const cy = rnd.chance(0.5) ? rnd.range(road * 1.2, road * 2.6) : rnd.range(S - road * 2.6, S - road * 1.2);
+    const r = px * 0.34;
+    a.fillStyle = '#3d4249';
+    a.beginPath(); a.arc(cx, cy, r, 0, TAU); a.fill();
+    a.strokeStyle = 'rgba(150,156,164,.5)';
+    a.lineWidth = 1.5;
+    a.beginPath(); a.arc(cx, cy, r * 0.82, 0, TAU); a.stroke();
+    for (let k = 0; k < 6; k++) {
+      const t = (k / 6) * TAU;
+      a.beginPath();
+      a.moveTo(cx + Math.cos(t) * r * 0.3, cy + Math.sin(t) * r * 0.3);
+      a.lineTo(cx + Math.cos(t) * r * 0.72, cy + Math.sin(t) * r * 0.72);
+      a.stroke();
+    }
+  }
+
+  // ---- lane markings ------------------------------------------------------
+  // Dashes are drawn as many short segments with a per-segment alpha so the paint
+  // looks worn rather than printed.
+  const paint = (x, y, w, h, alpha) => {
+    a.fillStyle = `rgba(232,228,208,${alpha})`;
+    a.fillRect(x, y, w, h);
+  };
+  const dash = px * 3, gap = px * 3;
+  // each dash gets its own alpha, so the paint looks worn instead of printed
+  for (let p = 0; p < S; p += dash + gap) {
+    paint(0, p, px * 0.22, dash, rnd.range(0.42, 0.72));
+    paint(S - px * 0.22, p, px * 0.22, dash, rnd.range(0.42, 0.72));
+    paint(p, 0, dash, px * 0.22, rnd.range(0.42, 0.72));
+    paint(p, S - px * 0.22, dash, px * 0.22, rnd.range(0.42, 0.72));
+  }
+  // solid lane edges at +/-5 m from the centre line
+  for (const at of [px * 5, S - px * 5]) {
+    paint(at - 1.2, 0, 2.4, S, 0.22);
+    paint(0, at - 1.2, S, 2.4, 0.22);
+  }
+  // stop bars just inside each crossing
+  for (const at of [px * 2.2, S - px * 2.2]) {
+    paint(at, road * 1.06, 2.4, road * 0.9, 0.30);
+    paint(at, S - road * 1.96, 2.4, road * 0.9, 0.30);
+    paint(road * 1.06, at, road * 0.9, 2.4, 0.30);
+    paint(S - road * 1.96, at, road * 0.9, 2.4, 0.30);
+  }
+  // zebra at each corner
+  for (const [zx, zy] of [[0, 0], [S, 0], [0, S], [S, S]]) {
+    for (let i = 0; i < 5; i++) {
+      const off = (i - 2) * px * 1.05;
+      const cx = Math.max(0, Math.min(S - px * 2.2, zx - px * 1.1));
+      const cy = Math.max(0, Math.min(S - px * 0.5, zy + off));
+      paint(cx, cy, px * 2.2, px * 0.48, 0.42);
+      const cy2 = Math.max(0, Math.min(S - px * 2.2, zy - px * 1.1));
+      const cx2 = Math.max(0, Math.min(S - px * 0.5, zx + off));
+      paint(cx2, cy2, px * 0.48, px * 2.2, 0.42);
+    }
+  }
+  // tyre wear: two darker ribbons per carriageway, where wheels actually run
+  a.fillStyle = 'rgba(14,16,20,.10)';
+  for (const lane of [px * 1.6, px * 3.3, S - px * 1.6, S - px * 3.3]) {
+    a.fillRect(0, lane - px * 0.42, S, px * 0.84);
+    a.fillRect(lane - px * 0.42, 0, px * 0.84, S);
+  }
+
+  // ---- bump ---------------------------------------------------------------
+  const bumpC = document.createElement('canvas');
+  bumpC.width = bumpC.height = S;
+  const bp = bumpC.getContext('2d', { willReadFrequently: true });
+  bp.fillStyle = gray(122);
+  bp.fillRect(0, 0, S, S);
+  bp.fillStyle = gray(126);
+  bp.fillRect(road, road, S - road * 2, S - road * 2);
+  bp.fillStyle = gray(132);
+  bp.fillRect(lot0, lot0, lot1 - lot0, lot1 - lot0);
+  {
+    const img = bp.getImageData(0, 0, S, S);
+    const d = img.data;
+    for (let y = 0; y < S; y += 2) {
+      const v = y / S;
+      for (let x = 0; x < S; x += 2) {
+        const g = grain(x / S, v);
+        const m = (g - 0.5) * 44;
+        for (let dy = 0; dy < 2; dy++) {
+          const row = ((y + dy) * S + x) * 4;
+          for (let dx = 0; dx < 2; dx++) {
+            const i = row + dx * 4;
+            const val = Math.max(0, Math.min(255, d[i] + m));
+            d[i] = d[i + 1] = d[i + 2] = val;
+          }
+        }
+      }
+    }
+    bp.putImageData(img, 0, 0);
+  }
+  // joints and cracks read as grooves
+  bp.strokeStyle = gray(74);
+  bp.lineWidth = 2;
+  for (let d = 0; d <= walk; d += paver) {
+    for (const y of [ringA + d, ringD - d]) { bp.beginPath(); bp.moveTo(ringA, y); bp.lineTo(ringD, y); bp.stroke(); }
+    for (const x of [ringA + d, ringD - d]) { bp.beginPath(); bp.moveTo(x, ringA); bp.lineTo(x, ringD); bp.stroke(); }
+  }
+  bp.strokeStyle = gray(70);
+  bp.lineWidth = 2.5;
+  bp.strokeRect(road, road, S - road * 2, S - road * 2);
+  bp.strokeStyle = gray(96);
+  bp.lineWidth = 2;
+  for (let p = lot0; p <= lot1; p += px * 3) {
+    bp.beginPath(); bp.moveTo(p, lot0); bp.lineTo(p, lot1); bp.stroke();
+    bp.beginPath(); bp.moveTo(lot0, p); bp.lineTo(lot1, p); bp.stroke();
+  }
+
+  // ---- roughness ----------------------------------------------------------
+  const roughC = document.createElement('canvas');
+  roughC.width = roughC.height = S;
+  const rp = roughC.getContext('2d');
+  rp.fillStyle = gray(214);                                    // asphalt: matte
+  rp.fillRect(0, 0, S, S);
+  rp.fillStyle = gray(198);
+  rp.fillRect(road, road, S - road * 2, S - road * 2);
+  rp.fillStyle = gray(204);
+  rp.fillRect(lot0, lot0, lot1 - lot0, lot1 - lot0);
+  for (let i = 0; i < 1400; i++) {
+    rp.fillStyle = gray(196 + rnd.range(-26, 26));
+    rp.fillRect(rnd.range(0, S), rnd.range(0, S), rnd.range(3, 22), rnd.range(3, 14));
+  }
+  // wet patches mirror the sky: this is what makes the street read as damp at dusk
+  for (const p of puddles) {
+    const g = rp.createRadialGradient(p.x, p.y, 0, p.x, p.y, Math.max(p.rx, p.ry));
+    g.addColorStop(0, gray(52));
+    g.addColorStop(0.72, gray(96));
+    g.addColorStop(1, gray(198));
+    rp.fillStyle = g;
+    rp.save();
+    rp.translate(p.x, p.y);
+    rp.scale(1, p.ry / p.rx);
+    rp.beginPath(); rp.arc(0, 0, p.rx, 0, TAU); rp.fill();
+    rp.restore();
+  }
+  // paint is smoother than the road it sits on
+  rp.fillStyle = gray(160);
+  for (let p = 0; p < S; p += dash + gap) {
+    rp.fillRect(0, p, px * 0.22, dash);
+    rp.fillRect(S - px * 0.22, p, px * 0.22, dash);
+    rp.fillRect(p, 0, dash, px * 0.22);
+    rp.fillRect(p, S - px * 0.22, dash, px * 0.22);
+  }
+
+  const out = {
+    map: toTexture(albedo, { repeat: 1 }),
+    bumpMap: toTexture(bumpC, { repeat: 1, srgb: false }),
+    roughnessMap: toTexture(roughC, { repeat: 1, srgb: false })
+  };
+  cache.set(key, out);
+  return out;
 }
 
 // ---------------------------------------------------------------- clouds
@@ -544,7 +1001,7 @@ export function vendingAtlas() {
 export function disposeTextures() {
   for (const v of cache.values()) {
     if (v && v.isTexture) v.dispose();
-    else if (v && v.map) { v.map.dispose(); v.emissiveMap.dispose(); }
+    else if (v) for (const t of [v.map, v.emissiveMap, v.bumpMap, v.roughnessMap]) t?.dispose?.();
   }
   cache.clear();
 }

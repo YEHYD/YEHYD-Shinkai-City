@@ -106,7 +106,10 @@ async function start() {
   atmosphere(s);
 
   await step(0.14, '正在计算建筑轮廓');
-  const layout = generateLayout();
+  const layout = generateLayout(undefined, {
+  // reserve the cast's stand spots first: nobody wants a utility pole through their head
+  reserved: NPCS.map(n => ({ x: n.x, z: n.z, r: 1.05 }))
+});
   const boxes = collisionBoxes(layout);
 
   await step(0.28, '正在浇筑街区');
@@ -119,7 +122,7 @@ async function start() {
   scene.add(frontage.group);
 
   await step(0.46, '正在点亮窗户');
-  const sky = createSky(scene);
+  const sky = createSky(scene, { quality });
   const lighting = createLighting(renderer, scene, { quality });
   const composer = createComposer(renderer, scene, camera, { quality });
 
@@ -216,6 +219,7 @@ async function start() {
     if (!convo) return;
     panel.show(convo);
     hud.focus(null);
+    input.exitLock();     // you need the cursor to click the options
   }
 
   function closeTalk() {
@@ -234,8 +238,9 @@ async function start() {
     if (Math.abs(px) > HALF - 6 || Math.abs(pz) > HALF - 6) return true;
     for (let i = 0; i < boxes.length; i++) {
       const b = boxes[i];
-      if (px > b.minX - SAFE_R && px < b.maxX + SAFE_R &&
-          pz > b.minZ - SAFE_R && pz < b.maxZ + SAFE_R) return true;
+      const r = b.pad ?? SAFE_R;
+      if (px > b.minX - r && px < b.maxX + r &&
+          pz > b.minZ - r && pz < b.maxZ + r) return true;
     }
     return false;
   }
@@ -289,6 +294,34 @@ async function start() {
     getPlayer: () => ({ x: player.position.x, z: player.position.z, facing: player.facing })
   });
 
+  // ---------------------------------------------------------------- pointer lock & pause
+  // The pointer is captured while you walk: the mouse turns the camera directly. Escape is
+  // the browser's own "give the cursor back", so losing the lock means we pause — one key,
+  // no custom handler, and the cursor is guaranteed to be visible while paused.
+  // Opening a panel releases the pointer on purpose (you want to click the options), so a
+  // deliberate release must not look like a pause.
+  const pauseEl = document.getElementById('pause');
+  const reticle = document.getElementById('reticle');
+  let paused = false;
+  let everLocked = false;
+  function setPaused(on) {
+    if (paused === on) return;
+    paused = on;
+    pauseEl.classList.toggle('on', on);
+  }
+  input.onLock(locked => {
+    reticle.classList.toggle('on', locked);
+    if (locked) { everLocked = true; setPaused(false); }
+    else if (everLocked && !panel.open && !map.isOpen) setPaused(true);
+  });
+  const grabPointer = () => {
+    if (panel.open || map.isOpen || cam.aerial) return;
+    setPaused(false);
+    input.requestLock();
+  };
+  canvas.addEventListener('click', grabPointer);
+  pauseEl.addEventListener('click', grabPointer);
+
   // ---------------------------------------------------------------- resize
   const onResize = () => {
     const w = window.innerWidth, h = window.innerHeight;
@@ -309,10 +342,14 @@ async function start() {
     const talking = panel.open;
 
     // --- conversation keys. E opens, and also fast-forwards the typewriter.
-    if (input.takePressed('KeyM')) { if (talking) closeTalk(); map.toggle(); }
-    if (input.takePressed('KeyV')) { map.close(); cam.toggleAerial(); }
+    if (input.takePressed('KeyM')) {
+      if (talking) closeTalk();
+      map.toggle();
+      if (map.isOpen) input.exitLock(); else if (!paused) input.requestLock();
+    }
+    if (input.takePressed('KeyV')) { map.close(); cam.toggleAerial(); input.exitLock(); }
     if (input.takePressed('Escape')) {
-      if (map.isOpen) map.close();
+      if (map.isOpen) { map.close(); if (!paused) input.requestLock(); }
       else if (talking) closeTalk();
     }
     if (input.takePressed('KeyE') && !map.isOpen && !cam.aerial) {
@@ -327,8 +364,11 @@ async function start() {
     }
 
     // Talking freezes the feet but not the world: the street keeps gossiping behind you.
-    // The map and the crane shot freeze them too — you are looking, not walking.
-    const frozen = talking || map.isOpen || cam.aerial;
+    // The map and the crane shot freeze them too — you are looking, not walking. Paused
+    // (pointer released) stops the clock as well: coming back should find the street where
+    // you left it, not two minutes later.
+    const frozen = talking || map.isOpen || cam.aerial || paused;
+    const sdt = paused ? 0 : dt;
     state.forward = frozen ? 0 : raw.forward;
     state.right = frozen ? 0 : raw.right;
     state.run = frozen ? false : raw.run;
@@ -337,17 +377,17 @@ async function start() {
     if (input.takePressed('BracketLeft')) s.minute -= 20;
     if (input.takePressed('BracketRight')) s.minute += 20;
 
-    tickAtmosphere(s, dt);
+    tickAtmosphere(s, sdt);
     atmosphere(s);
-    social.tick(dt);
+    social.tick(sdt);
 
-    player.update(dt, state, cam.yaw);
-    cam.update(dt, player.position);
+    player.update(sdt, state, cam.yaw);
+    cam.update(sdt, player.position);
 
     sky.update(s, time);
     city.update(s);
     frontage.update(s);
-    lighting.update(s, dt, player.position);
+    lighting.update(s, sdt, player.position);
     composer.update(s);
 
     // --- nearest character, for the prompt
@@ -374,8 +414,8 @@ async function start() {
     if (frozen) { focusNpc = null; hud.focus(null); }
 
     for (let i = 0; i < actors.length; i++) actors[i].update(camera, s, time);
-    crowd.update(camera, s, dt, time);
-    traffic.update(camera, s, dt);
+    crowd.update(camera, s, sdt, time);
+    traffic.update(camera, s, sdt);
 
     if (self) {
       self.moveTo(player.position.x, player.position.z);
@@ -402,7 +442,8 @@ async function start() {
   loop.start();
 
   // Handy for poking at the scene from the console during visual QA.
-  window.__shinkai = { scene, camera, renderer, s, player, cam, actors, layout, sky, lighting, city, composer, input, sprites, self, social, dialogue, panel, frontage, crowd, traffic, map, safeSpot, THREE };
+  window.__shinkai = { scene, camera, renderer, s, player, cam, actors, layout, sky, lighting, city, composer, input, sprites, self, social, dialogue, panel, frontage, crowd, traffic, map, safeSpot, THREE,
+    get paused() { return paused; }, setPaused, grabPointer };
   console.log('%c[shinkai] ready', 'color:#7fb2ff', `buildings=${layout.buildings.length}`, `npc=${actors.length}`, `quality=${quality}`);
 }
 

@@ -73,33 +73,34 @@ export function createDialoguePanel({ onChoose, faceSrc }) {
     if (typing) { e.preventDefault(); finishTyping(); }
   });
 
+  function paint(conv) {
+    current = conv;
+    // A warm character glows warm; someone who has gone cold reads cool, so the
+    // player can feel the relationship without opening a stats page.
+    const accent = conv.mood < -0.15 ? '#9fc0e8' : (conv.accent || '#ffe3b8');
+    root.classList.add('on');
+    const meter = conv.rounds > 1
+      ? `<em class="talk-round">${Math.min(conv.round + 1, conv.rounds)} / ${conv.rounds}</em>`
+      : '';
+    nameEl.innerHTML = `${conv.name}<span>${conv.role}</span>${meter}`;
+    nameEl.style.setProperty('--accent', accent);
+    // The portrait has to come through faceSrc: in the single-file build the drawing is a
+    // data: URL, and a hard-coded ./assets/... path would 404 on a file:// page.
+    const portrait = faceSrc ? faceSrc(conv.npcId) : `./assets/characters/${conv.npcId}/front.webp`;
+    face.style.backgroundImage = `url("${portrait}")`;
+    face.style.setProperty('--accent', accent);
+    setOptions(conv.options);
+    type(conv.text);
+  }
+
   return {
     get open() { return current !== null; },
     get typing() { return typing; },
 
-    show(conv) {
-      current = conv;
-      // A warm character glows warm; someone who has gone cold reads cool, so the
-      // player can feel the relationship without opening a stats page.
-      const accent = conv.mood < -0.15 ? '#9fc0e8' : (conv.accent || '#ffe3b8');
-      root.classList.add('on');
-      nameEl.innerHTML = `${conv.name}<span>${conv.role}</span>`;
-      nameEl.style.setProperty('--accent', accent);
-      // The portrait has to come through faceSrc: in the single-file build the drawing is a
-      // data: URL, and a hard-coded ./assets/... path would 404 on a file:// page.
-      const portrait = faceSrc ? faceSrc(conv.npcId) : `./assets/characters/${conv.npcId}/front.webp`;
-      face.style.backgroundImage = `url("${portrait}")`;
-      face.style.setProperty('--accent', accent);
-      setOptions(conv.options);
-      type(conv.text);
-    },
+    show(conv) { paint(conv); },
 
     /** Replace the body text (the NPC's reply) without closing the panel. */
-    replace(conv) {
-      current = conv;
-      setOptions(conv.options);
-      type(conv.text);
-    },
+    replace(conv) { paint(conv); },
 
     skip: finishTyping,
 

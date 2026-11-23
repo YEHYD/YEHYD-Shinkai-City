@@ -27,18 +27,21 @@ const MOON_LEAN = 1.27;
 const KEYS = {
   day: {
     zenith: '#2f6fc4', horizon: '#c6dcee', ground: '#b9c8d4',
-    light: '#fff4e4', lightI: 3.6, hemiSky: '#dfe9f2', hemiGround: '#9c9382', hemiI: 1.5,
+    // A 3.6 key against a 1.5 fill is a hard, contrasty sun (every facade facing it lands on
+    // the shoulder of the tonemap). Lower the key, raise the fill: same exposure, much less
+    // glare, and shadows stop reading as black holes.
+    light: '#fff4e4', lightI: 2.55, hemiSky: '#dfe9f2', hemiGround: '#9c9382', hemiI: 1.92,
     env: 0.4, exposure: 1.0
   },
   warm: {
     zenith: '#2b3f74', horizon: '#f6a468', ground: '#bb8a72',
-    light: '#ffa45c', lightI: 2.4, hemiSky: '#e5ab8a', hemiGround: '#6b5442', hemiI: 1.42,
-    env: 0.38, exposure: 1.16
+    light: '#ffa45c', lightI: 1.78, hemiSky: '#e5ab8a', hemiGround: '#6b5442', hemiI: 1.72,
+    env: 0.38, exposure: 1.14
   },
   night: {
     zenith: '#03060f', horizon: '#1b2742', ground: '#101828', light: '#c4cfe8',
-    lightI: 0.5, hemiSky: '#5d6a86', hemiGround: '#23252d', hemiI: 1.15,
-    env: 0.22, exposure: 1.55
+    lightI: 0.42, hemiSky: '#5d6a86', hemiGround: '#23252d', hemiI: 1.26,
+    env: 0.22, exposure: 1.5
   }
 };
 const SUN_DISC_HIGH = new THREE.Color('#fff6e6');

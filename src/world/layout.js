@@ -24,9 +24,10 @@ export const TILE_BAYS_Y = 6;
 /** Where the player starts: the crossing at the centre of the grid. */
 export const SPAWN = { x: 0, z: 0, yaw: Math.PI };
 
-/** Sidewalk centre line, measured out from a road's centre line. */
-export const WALK_IN = ROAD_HALF + 1.7;
-export const WALK_OUT = ROAD_HALF + 2.5;
+/** Pedestrian lanes, measured out from a road's centre line. They hug the kerb so the
+ *  crowd walks past the furniture parked against the shopfronts instead of through it. */
+export const WALK_IN = ROAD_HALF + 1.05;
+export const WALK_OUT = ROAD_HALF + 1.45;
 
 // A facade only carries shops where it is close enough to a carriageway to be read as
 // the street wall. Faces deep inside a block stay blank — that is a courtyard, not a shop.
@@ -50,7 +51,7 @@ function streetFaces(x, z, w, d) {
   return out;
 }
 
-export function generateLayout(seed = 20261123) {
+export function generateLayout(seed = 20261123, opts = {}) {
   const rnd = makeRandom(seed);
   const buildings = [];
   const plazas = [];
@@ -149,7 +150,12 @@ export function generateLayout(seed = 20261123) {
   }
 
   // ---------------------------------------------------------------- street lamps
-  // One every 24 m on both sides of every road, sitting on the sidewalk edge.
+  // One every 24 m on both sides of every road, sitting on the kerb line — the arm leans
+  // out over the carriageway, the post stays clear of the walking lane and the awnings.
+  const occ = createOccupancy();
+  // People outrank furniture: an NPC's stand spot is reserved before anything is placed,
+  // so no pole or vending machine can appear inside a character.
+  for (const r of (opts.reserved || [])) occ.place([], r, r.r ?? 1.05);
   const step = 24;
   for (let k = 0; k <= GRID; k++) {
     const line = -HALF + CELL * k;
@@ -157,52 +163,106 @@ export function generateLayout(seed = 20261123) {
       for (const side of [-1, 1]) {
         // Skip lamps that would land inside the road at a crossing.
         if (Math.abs((((p + HALF) % CELL) + CELL) % CELL - CELL / 2) > CELL / 2 - 8) continue;
-        lamps.push({ x: line + side * (ROAD_HALF + 1.2), z: p, yaw: side > 0 ? Math.PI : 0 });
-        lamps.push({ x: p, z: line + side * (ROAD_HALF + 1.2), yaw: side > 0 ? Math.PI / 2 : -Math.PI / 2 });
+        const off = side * (ROAD_HALF + 0.45);
+        occ.place(lamps, { x: line + off, z: p, yaw: side > 0 ? Math.PI : 0 }, 0.5);
+        occ.place(lamps, { x: p, z: line + off, yaw: side > 0 ? Math.PI / 2 : -Math.PI / 2 }, 0.5);
       }
     }
   }
 
-  return { buildings, plazas, lamps, signs, blockCenters, props: streetProps(rnd, plazas) };
+  return { buildings, plazas, lamps, signs, blockCenters, props: streetProps(rnd, plazas, occ) };
 }
 
 /**
- * The furniture that makes a street a street: vending machines against the kerb, a
- * utility pole line with sagging wires overhead, and signals on the busier corners.
- * All of it is data; frontage.js turns it into three merged meshes.
+ * The furniture that makes a street a street: vending machines against the shopfronts, a
+ * utility pole line with sagging wires overhead, signals on the busier corners, trees on
+ * the kerb — and an occupancy list so none of it grows through any of the rest.
+ *
+ * The 3 m sidewalk is split by function:
+ *   6.45 m  kerb line     lamps, trees
+ *   7.05 m  walking lane  the crowd (crowd.js places walkers on WALK_IN)
+ *   7.45 m  walking lane  walkers going the other way
+ *   7.78 m  utility poles, clear of the 1.08 m awnings overhead
+ *   8.20 m  vending machines, back against the shopfronts
+ * Before this split pedestrians walked through the vending machines, and the poles ran
+ * straight through the awning line at 3.16 m.
  */
-function streetProps(rnd, plazas) {
-  const props = { vending: [], poles: [], wires: [], signals: [], benches: [] };
+function createOccupancy() {
+  const placed = [];
+  return {
+    free(x, z, r) {
+      for (const p of placed) {
+        const dx = x - p.x, dz = z - p.z;
+        const min = r + p.r + 0.32;
+        if (dx * dx + dz * dz < min * min) return false;
+      }
+      return true;
+    },
+    place(list, item, r) {
+      if (!this.free(item.x, item.z, r)) return false;
+      placed.push({ x: item.x, z: item.z, r });
+      list.push(item);
+      return true;
+    }
+  };
+}
 
-  // --- roads run both ways at every grid line; furniture lives on the sidewalk band
+function streetProps(rnd, plazas, occ) {
+  const props = { vending: [], poles: [], wires: [], signals: [], benches: [], trees: [] };
+
+  const CURB = ROAD_HALF + 0.45;       // 6.45
+  const POLE_OFF = ROAD_HALF + 1.78;   // 7.78
+  const VEND_OFF = ROAD_HALF + 2.20;   // 8.20
+
+  // --- trees, vending machines, poles: all along the same kerbs
   for (let k = 0; k <= GRID; k++) {
     const line = -HALF + CELL * k;
 
     for (const side of [-1, 1]) {
-      const off = side * WALK_IN;
+      // --- street trees on the kerb line, every 18 m, both directions
+      for (let t = -HALF + 12 + (k % 2) * 9; t < HALF - 8; t += 18) {
+        occ.place(props.trees, {
+          x: line + side * CURB + rnd.range(-0.15, 0.15),
+          z: t + rnd.range(-1.2, 1.2),
+          kind: 'street', scale: rnd.range(0.85, 1.2), seed: rnd.next()
+        }, 0.8);
+        occ.place(props.trees, {
+          x: t + rnd.range(-1.2, 1.2),
+          z: line + side * CURB + rnd.range(-0.15, 0.15),
+          kind: 'street', scale: rnd.range(0.85, 1.2), seed: rnd.next()
+        }, 0.8);
+      }
 
-      // vending machines: frequent enough to read as a Japanese street, sparse enough
+      // --- vending machines: frequent enough to read as a Japanese street, sparse enough
       // that the eye is not tripping over them
       for (let t = -HALF + 16; t < HALF; t += 24) {
         if (rnd.chance(0.22)) {
-          const jitter = rnd.range(-5, 5);
-          // along a road that runs in z (fixed x = line)
-          props.vending.push({ x: line + off, z: t + jitter, yaw: side > 0 ? -Math.PI / 2 : Math.PI / 2 });
+          occ.place(props.vending, {
+            x: line + side * VEND_OFF,
+            z: t + rnd.range(-5, 5),
+            yaw: side > 0 ? -Math.PI / 2 : Math.PI / 2
+          }, 0.62);
         }
         if (rnd.chance(0.22)) {
-          const jitter = rnd.range(-5, 5);
-          props.vending.push({ x: t + jitter, z: line + off, yaw: side > 0 ? Math.PI : 0 });
+          occ.place(props.vending, {
+            x: t + rnd.range(-5, 5),
+            z: line + side * VEND_OFF,
+            yaw: side > 0 ? Math.PI : 0
+          }, 0.62);
         }
       }
 
-      // utility poles: one per block, wires strung between neighbours
+      // --- utility poles: one per block, wires strung between neighbours
       const poleZ = [];
       const poleX = [];
       for (let t = -HALF + CELL / 2; t < HALF; t += CELL) {
-        poleZ.push({ x: line + side * WALK_OUT, z: t, yaw: 0 });
-        poleX.push({ x: t, z: line + side * WALK_OUT, yaw: 0 });
+        if (occ.place(props.poles, { x: line + side * POLE_OFF, z: t, yaw: 0 }, 0.34)) {
+          poleZ.push({ x: line + side * POLE_OFF, z: t, yaw: 0 });
+        }
+        if (occ.place(props.poles, { x: t, z: line + side * POLE_OFF, yaw: 0 }, 0.34)) {
+          poleX.push({ x: t, z: line + side * POLE_OFF, yaw: 0 });
+        }
       }
-      props.poles.push(...poleZ, ...poleX);
       for (let i = 1; i < poleZ.length; i++) {
         props.wires.push({ x1: poleZ[i - 1].x, z1: poleZ[i - 1].z, x2: poleZ[i].x, z2: poleZ[i].z });
       }
@@ -221,39 +281,65 @@ function streetProps(rnd, plazas) {
       for (const sx of [-1, 1]) {
         for (const sz of [-1, 1]) {
           if (rnd.chance(0.35)) continue;
-          props.signals.push({
-            x: px + sx * WALK_IN,
-            z: pz + sz * WALK_IN,
+          const sat = ROAD_HALF + 0.7;
+          occ.place(props.signals, {
+            x: px + sx * sat,
+            z: pz + sz * sat,
             // the head faces back across the junction
             yaw: Math.atan2(-sx, -sz)
-          });
+          }, 0.42);
         }
       }
     }
   }
 
-  // --- benches and planters on the plazas, facing the open ground
+  // --- benches and planting on the plazas, facing the open ground
   for (const p of plazas) {
     const n = rnd.int(2, 5);
     for (let i = 0; i < n; i++) {
       const a = rnd.range(0, Math.PI * 2);
       const rad = rnd.range(4, 11);
-      props.benches.push({
+      occ.place(props.benches, {
         x: p.x + Math.cos(a) * rad,
         z: p.z + Math.sin(a) * rad,
         yaw: a + Math.PI
-      });
+      }, 1.0);
+    }
+    // low planting: bushes at the plaza edge, the courtyard version of a hedge
+    const bushes = rnd.int(5, 10);
+    for (let i = 0; i < bushes; i++) {
+      const a = rnd.range(0, Math.PI * 2);
+      const rad = rnd.range(3.6, 12.5);
+      occ.place(props.trees, {
+        x: p.x + Math.cos(a) * rad,
+        z: p.z + Math.sin(a) * rad,
+        kind: 'bush', scale: rnd.range(0.7, 1.25), seed: rnd.next()
+      }, 0.55);
     }
   }
 
   return props;
 }
 
-/** Axis-aligned boxes the walker cannot enter (buildings only; plazas are walkable). */
+/** Axis-aligned boxes the walker cannot enter: buildings, plus the street furniture you
+ *  should not be able to walk through. Each carries its own padding — an NPC-sized 0.9 m
+ *  around a vending machine would block the whole pavement. */
 export function collisionBoxes(layout) {
-  return layout.buildings.map(b => ({
+  const out = layout.buildings.map(b => ({
     minX: b.x - b.w / 2, maxX: b.x + b.w / 2,
     minZ: b.z - b.d / 2, maxZ: b.z + b.d / 2,
     h: b.h
   }));
+
+  const props = layout.props;
+  if (props) {
+    const box = (x, z, r, h, pad) => out.push({ minX: x - r, maxX: x + r, minZ: z - r, maxZ: z + r, h, pad });
+    for (const v of props.vending) box(v.x, v.z, 0.55, 1.9, 0.2);
+    for (const b of props.benches) box(b.x, b.z, 0.85, 0.9, 0.2);
+    for (const t of props.trees) box(t.x, t.z, t.kind === 'street' ? 0.3 : 0.6, 3, 0.14);
+    for (const p of props.poles) box(p.x, p.z, 0.16, 7.8, 0.12);
+    for (const g of props.signals) box(g.x, g.z, 0.14, 4.4, 0.12);
+  }
+
+  return out;
 }

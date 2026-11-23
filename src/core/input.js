@@ -1,9 +1,21 @@
 // Keyboard + pointer state for a third-person walker.
 //
-// Mouse/touch drag orbits the camera (the pointer is captured, not lock-stepped, so the
-// page stays usable without a permission prompt). Wheel zooms. The look deltas are
-// accumulated and consumed once per frame so a burst of pointermove events between two
-// frames cannot outrun the camera.
+// Two ways to look around, whichever the browser gives us:
+//
+// * **pointer lock** — the normal one. Click the canvas and the pointer disappears and is
+//   captured; every mouse movement turns the camera directly, no button held. Escape is
+//   the browser's own "release the pointer", so the same key that closes a menu also
+//   hands the cursor back, and `onLock` reports it so the game can pause.
+// * **drag** — the fallback, for a page that cannot get the lock (an iframe without
+//   allow-pointer-lock, or an automated browser that refuses the request). Holding the
+//   left button and dragging orbits the camera exactly as before.
+//
+// Look deltas are accumulated and consumed once per frame, so a burst of pointermove
+// events between two frames cannot outrun the camera.
+
+// Locked deltas arrive as raw device-ish pixels; a factor under 1 keeps the same feel as
+// the drag path without the 1.6x-wider travel of a real mouse.
+const LOCK_SENS = 0.62;
 
 export function createInput(canvas) {
   const down = new Set();
@@ -13,6 +25,8 @@ export function createInput(canvas) {
     // One-shot presses, drained by the frame that reads them.
     pressed: new Set()
   };
+  const lockListeners = new Set();
+  let locked = false;
 
   const CODE_MAP = {
     KeyW: 'forward+', ArrowUp: 'forward+',
@@ -41,10 +55,32 @@ export function createInput(canvas) {
   };
   const onBlur = () => down.clear();
 
-  // ---- pointer orbit
+  // ---- pointer lock
+  const onLockChange = () => {
+    const now = document.pointerLockElement === canvas;
+    if (now === locked) return;
+    locked = now;
+    dragging = false;
+    pid = -1;
+    canvas.style.cursor = '';
+    for (const fn of lockListeners) fn(locked);
+  };
+  const onLockError = () => {
+    // A refused request is *not* the same thing as losing the lock: we never had it, so
+    // nothing must react as if the player paused. Drag-to-look still covers this case.
+    locked = false;
+  };
+  const onMouseMove = e => {
+    if (!locked) return;
+    state.lookX += (e.movementX || 0) * LOCK_SENS;
+    state.lookY += (e.movementY || 0) * LOCK_SENS;
+  };
+
+  // ---- pointer orbit (fallback when the lock is unavailable)
   let dragging = false, lastX = 0, lastY = 0, pid = -1;
 
   const onPointerDown = e => {
+    if (locked) return;
     if (e.button !== 0 && e.pointerType === 'mouse') return;
     dragging = true;
     pid = e.pointerId;
@@ -53,7 +89,7 @@ export function createInput(canvas) {
     canvas.style.cursor = 'grabbing';
   };
   const onPointerMove = e => {
-    if (!dragging || e.pointerId !== pid) return;
+    if (locked || !dragging || e.pointerId !== pid) return;
     state.lookX += e.clientX - lastX;
     state.lookY += e.clientY - lastY;
     lastX = e.clientX; lastY = e.clientY;
@@ -72,6 +108,9 @@ export function createInput(canvas) {
   window.addEventListener('keydown', onKeyDown, { passive: false });
   window.addEventListener('keyup', onKeyUp);
   window.addEventListener('blur', onBlur);
+  document.addEventListener('pointerlockchange', onLockChange);
+  document.addEventListener('pointerlockerror', onLockError);
+  document.addEventListener('mousemove', onMouseMove);
   canvas.addEventListener('pointerdown', onPointerDown);
   canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('pointerup', endDrag);
@@ -97,11 +136,31 @@ export function createInput(canvas) {
       state.pressed.delete(code);
       return true;
     },
+
+    /** Ask the browser to capture the pointer. Safe to call when already locked. */
+    requestLock() {
+      if (locked) return;
+      try {
+        const p = canvas.requestPointerLock?.();
+        // Chrome returns a promise here and rejects it when it wants a fresher gesture.
+        if (p && typeof p.catch === 'function') p.catch(() => onLockError());
+      } catch { onLockError(); }
+    },
+    /** Hand the cursor back. The browser also does this itself on Escape. */
+    exitLock() {
+      if (locked) document.exitPointerLock?.();
+    },
+    /** Fires with true/false whenever the lock is taken, released or refused. */
+    onLock(fn) { lockListeners.add(fn); return () => lockListeners.delete(fn); },
+    get locked() { return locked; },
     get dragging() { return dragging; },
     dispose() {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
+      document.removeEventListener('pointerlockchange', onLockChange);
+      document.removeEventListener('pointerlockerror', onLockError);
+      document.removeEventListener('mousemove', onMouseMove);
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', endDrag);

@@ -46,8 +46,11 @@ export function createComposer(renderer, scene, camera, opts = {}) {
       // Dusk and night want halos; midday wants a clean image. The night number is kept
       // low on purpose: everything emissive in this city is already bright, and a strong
       // bloom pass on top of it turns the shop signs and street lamps into white blobs.
-      const strength = 0.24 + 0.34 * s.night + 0.13 * s.warm;
-      const radius = 0.54 + 0.10 * s.night;
+      // Wider and weaker than before: the halo should be a breath around a lamp, not a
+      // white disc. A higher threshold keeps mid-bright concrete and glass out of it
+      // entirely, which is where most of the "too harsh" came from.
+      const strength = 0.19 + 0.29 * s.night + 0.09 * s.warm;
+      const radius = 0.68 + 0.08 * s.night;
       if (Math.abs(strength - applied.strength) > 0.01) {
         bloom.strength = strength;
         applied.strength = strength;
@@ -57,7 +60,7 @@ export function createComposer(renderer, scene, camera, opts = {}) {
         applied.radius = radius;
       }
       // Only genuinely bright pixels bloom: neon signs, lamp heads, the sun.
-      bloom.threshold = 0.78 + 0.12 * (1 - s.night);
+      bloom.threshold = 0.84 + 0.10 * (1 - s.night);
     },
     dispose() {
       composer.dispose();

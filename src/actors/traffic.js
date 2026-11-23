@@ -42,10 +42,36 @@ export function createTraffic(opts = {}) {
       off,
       dir,
       t: -HALF + 12 + ((slot + rnd.next()) / perSlot) * (HALF * 2 - 24),
-      speed: rnd.range(6.5, 13),
+      speed: 9,
       paint: new THREE.Color(rnd.pick(PAINT)),
       x: 0, z: 0, yaw: 0
     });
+  }
+
+  // ---------------------------------------------------------------- lane queues
+  // Cars sharing a carriageway share one speed. Different speeds in one lane meant a car
+  // drove *through* the one in front of it; a single speed keeps every gap constant for
+  // the whole life of the traffic. The queue array is the lane order, so a car that runs
+  // off the end of the grid re-enters at the back of its own queue instead of blinking
+  // out — which also keeps the spacing honest.
+  const P_MIN = -HALF + 6, P_MAX = HALF - 6, MIN_GAP = 7.2;
+  const laneQueues = [];
+  {
+    const byKey = new Map();
+    for (const c of cars) {
+      const key = `${c.axis}|${Math.round(c.road)}|${c.dir}`;
+      if (!byKey.has(key)) byKey.set(key, { axis: c.axis, road: c.road, dir: c.dir, queue: [] });
+      byKey.get(key).queue.push(c);
+    }
+    for (const lane of byKey.values()) {
+      const prog = c => (lane.dir > 0 ? c.t : -c.t);
+      lane.queue.sort((a, b) => prog(a) - prog(b));
+      // a lane's speed: deterministic per carriageway, so the grid feels varied but stable
+      const seed = Math.abs(Math.round(lane.road) * 7 + (lane.axis === 'z' ? 3 : 1) + lane.dir);
+      const speed = 6.5 + ((seed * 37) % 61) / 10;   // 6.5 … 12.5 m/s
+      for (const c of lane.queue) c.speed = speed;
+      laneQueues.push(lane);
+    }
   }
 
   // ---------------------------------------------------------------- meshes
@@ -103,14 +129,68 @@ export function createTraffic(opts = {}) {
     cars,
 
     update(camera, s, dt) {
+      // --- which crossings are in use right now: bit 1 for north–south, bit 2 for
+      // east–west. A car about to enter a box the other axis already holds waits.
+      const junction = new Map();
+      for (const c of cars) {
+        const i = Math.round((c.x + HALF) / CELL);
+        const j = Math.round((c.z + HALF) / CELL);
+        const jx = -HALF + CELL * i, jz = -HALF + CELL * j;
+        if (Math.abs(c.x - jx) < 7.5 && Math.abs(c.z - jz) < 7.5) {
+          const k = i * 1000 + j;
+          junction.set(k, (junction.get(k) || 0) | (c.axis === 'z' ? 1 : 2));
+        }
+      }
+
+      for (const lane of laneQueues) {
+        const q = lane.queue;
+        const other = lane.axis === 'z' ? 2 : 1;
+        let limit = Infinity;
+        for (let i = q.length - 1; i >= 0; i--) {
+          const c = q[i];
+          let p = lane.dir > 0 ? c.t : -c.t;
+          let next = p + c.speed * dt;
+          // never close on the car ahead: a queue keeps its spacing
+          if (next > limit - MIN_GAP) next = Math.max(p, limit - MIN_GAP);
+
+          const tn = lane.dir > 0 ? next : -next;
+          const tc = lane.dir > 0 ? p : -p;
+          const idx = Math.round((tn + HALF) / CELL);
+          const ctr = -HALF + CELL * idx;
+          // only hold *before* entering: a car already inside must be allowed to clear it
+          if (Math.abs(tn - ctr) < 7.0 && Math.abs(tc - ctr) > 6.0) {
+            const road = lane.road + c.off;
+            const i2 = lane.axis === 'z' ? Math.round((road + HALF) / CELL) : idx;
+            const j2 = lane.axis === 'z' ? idx : Math.round((road + HALF) / CELL);
+            if ((junction.get(i2 * 1000 + j2) || 0) & other) next = p;
+          }
+
+          c.t = lane.dir > 0 ? next : -next;
+          limit = next;
+        }
+
+        // --- wrap: the head of the lane re-enters at the back of its own queue, so the
+        // gaps stay even instead of a car blinking out mid-street
+        const headP = () => (lane.dir > 0 ? q[q.length - 1].t : -q[q.length - 1].t);
+        if (q.length === 1) {
+          if (headP() > P_MAX) {
+            const np = P_MIN;
+            q[0].t = lane.dir > 0 ? np : -np;
+          }
+        } else {
+          while (headP() > P_MAX) {
+            const car = q.pop();
+            const tailP = lane.dir > 0 ? q[0].t : -q[0].t;
+            const np = tailP - MIN_GAP;
+            car.t = lane.dir > 0 ? np : -np;
+            q.unshift(car);
+          }
+        }
+      }
+
+      // --- place and draw
       for (let i = 0; i < cars.length; i++) {
         const c = cars[i];
-        c.t += c.dir * c.speed * dt;
-        // wrap at the edge: the fog and the far skyline make the ends of the grid a
-        // reasonable place for a car to leave the world and come back
-        if (c.t > HALF - 4) c.t = -HALF + 4;
-        else if (c.t < -HALF + 4) c.t = HALF - 4;
-
         if (c.axis === 'z') {
           c.x = c.road + c.off;
           c.z = c.t;

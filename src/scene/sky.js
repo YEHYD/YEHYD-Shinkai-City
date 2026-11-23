@@ -34,12 +34,47 @@ uniform float uStars;
 uniform float uMoonUp;
 uniform float uSunSize;
 uniform float uTime;
-uniform sampler2D uCloudTex;
 uniform vec3 uCloudCol;
 uniform float uCloudAmt;
+uniform float uCloudH;
+uniform float uDensityBias;
+uniform float uCoverLo;
+uniform float uCoverHi;
 
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+// ---------------------------------------------------------------- perlin noise
+// Gradient noise on a lattice, faded with the quintic, then stacked. A texture would tile
+// and a sum of sines reads as a pattern; fbm is the only cheap thing that looks like sky.
+vec2 hash22(vec2 p) {
+  p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+  return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
+}
+
+float perlin(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  float a = dot(hash22(i), f);
+  float b = dot(hash22(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0));
+  float c = dot(hash22(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0));
+  float d = dot(hash22(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+float fbm(vec2 p) {
+  float v = 0.0;
+  float amp = 0.52;
+  // rotate between octaves so the lattice never lines up with itself
+  mat2 rot = mat2(0.80, 0.60, -0.60, 0.80);
+  for (int i = 0; i < FBM_OCTAVES; i++) {
+    v += amp * perlin(p);
+    p = rot * p * 2.03 + 11.7;
+    amp *= 0.53;
+  }
+  return v;
 }
 
 void main() {
@@ -53,29 +88,38 @@ void main() {
   // Below the horizon: fade into the ground haze.
   col = mix(col, uGround, smoothstep(0.0, -0.25, d.y));
 
-  // --- horizon cloud bands, drawn into the dome itself
-  // The mesh decks above the city cannot help here: from pavement level the sky you
-  // actually see down a street is the wedge *below* ~14°, and a deck at 700 m only
-  // reaches that low once it is thousands of metres across. Painting the bands in the
-  // dome keeps them at every camera height and every pitch, which is what makes the
-  // sunset sky read as a sky and not as a smooth gradient.
-  //
-  // Project the view ray onto a flat sheet overhead instead of sampling by azimuth:
-  // that is what a real cloud deck looks like, with the puffs shrinking and stacking
-  // up towards the horizon, and it stops the texture from reading as tiles.
-  vec2 cp = d.xz / max(d.y, 0.075) * 0.26;
-  float c1 = texture2D(uCloudTex, cp * 1.0 + vec2(uTime * 0.0006, 0.0)).a;
-  float c2 = texture2D(uCloudTex, cp * 2.7 + vec2(-uTime * 0.0011, 0.37)).a;
-  float c3 = texture2D(uCloudTex, cp * 6.1 + vec2(uTime * 0.0018, 0.71)).a;
-  // A slow, large-scale mask punches gaps in the sheet: without it the bands clamp to
-  // full coverage and the sky turns into a flat white lid instead of a sky.
-  float mask = texture2D(uCloudTex, cp * 0.34 + vec2(0.21, 0.07)).a;
-  float cover = c1 * 0.60 + c2 * 0.30 + c3 * 0.14;
-  cover = smoothstep(0.16, 0.70, cover);
-  cover *= smoothstep(0.24, 0.58, mask + 0.10);
-  // keep a clear band right at the horizon and let the deck thin out overhead
-  cover *= smoothstep(-0.01, 0.06, d.y) * (1.0 - smoothstep(0.22, 0.55, d.y));
-  float sunVis = 1.0 - cover * 0.62;
+  // --- clouds, drawn into the dome itself
+  // Project the view ray onto a flat sheet overhead: that is what a real deck looks like,
+  // with puffs shrinking and stacking up towards the horizon. uCloudH is how high that
+  // sheet sits — a higher sheet means the same cloud is further away, so it reads smaller
+  // and further up the sky instead of hanging over the rooftops.
+  vec2 cp = d.xz / max(d.y, 0.075) * uCloudH;
+  vec2 drift = vec2(uTime * 0.0019, uTime * 0.0011);
+
+  // Domain warp: two slow fields push the sampling point around, which is what turns
+  // smooth fbm blobs into the cauliflower edges of a cumulus deck.
+  vec2 warp = vec2(
+    fbm(cp * 1.35 + drift * 1.4 + 5.2),
+    fbm(cp * 1.35 - drift * 1.1 + 9.7)
+  );
+  float base = fbm(cp * 1.75 + warp * 1.15 + drift * 0.5);
+  float detail = fbm(cp * 5.20 + warp * 2.30 - drift * 0.8);
+  // low frequency gate so whole regions of the sky stay clear
+  float gate = fbm(cp * 0.55 - drift * 0.3 + 21.0);
+  // Straight overhead the projected coordinate barely moves, so everything above ~60°
+  // turns into one flat white lid. This last field samples the view direction itself,
+  // which keeps its detail exactly where the projection loses it.
+  float fine = fbm(vec2(d.x * 7.4 + uTime * 0.0035, d.z * 7.4 - uTime * 0.0026));
+
+  float density = base * 0.70 + detail * 0.26 + gate * 0.26 + fine * 0.17 + uDensityBias;
+  float cover = smoothstep(uCoverLo, uCoverHi, density);
+  // Soft rims: a second, wider threshold keeps the edge from looking cut out with scissors.
+  cover = mix(cover, smoothstep(0.20, 0.78, density), 0.35);
+  // keep a clear band right at the horizon, thin the deck out towards the zenith but never
+  // all the way — a sky with a hole straight overhead reads as a bug, not as weather
+  cover *= smoothstep(-0.01, 0.07, d.y) * (1.0 - 0.55 * smoothstep(0.55, 0.95, d.y));
+
+  float sunVis = 1.0 - cover * 0.72;
 
   // --- the sun: a wide halo, a warm band along the horizon, and the disc itself
   float cosA = dot(d, uSunDir);
@@ -92,8 +136,11 @@ void main() {
   float disc = 1.0 - smoothstep(uSunSize * 0.80, uSunSize, ang);
   col += uSunColor * disc * 6.0 * (1.0 - cover * 0.85);
 
-  // Clouds last, so they occlude the halo instead of being washed out by it.
-  col = mix(col, uCloudCol, cover * uCloudAmt);
+  // Clouds last, so they occlude the halo instead of being washed out by it. The rim of
+  // a puff is lifted a little: that is the lit edge, and it is what makes the deck read
+  // as volume rather than as a flat sticker on the sky.
+  float edge = smoothstep(0.24, 0.44, density) * (1.0 - smoothstep(0.44, 0.70, density));
+  col = mix(col, uCloudCol * (0.90 + 0.22 * edge), cover * uCloudAmt);
 
   // --- the moon: a small disc with a soft halo, only while it is up
   float moonAng = acos(clamp(dot(d, uMoonDir), -1.0, 1.0));
@@ -122,7 +169,8 @@ void main() {
 
 const SKY_RADIUS = 3200;
 
-export function createSky(scene) {
+export function createSky(scene, opts = {}) {
+  const quality = opts.quality || 'full';
   const uniforms = {
     uZenith: { value: new THREE.Color() },
     uHorizon: { value: new THREE.Color() },
@@ -138,23 +186,17 @@ export function createSky(scene) {
     uMoonUp: { value: 0 },
     uSunSize: { value: 0.012 },
     uTime: { value: 0 },
-    uCloudTex: { value: null },
     uCloudCol: { value: new THREE.Color('#fff2e4') },
-    uCloudAmt: { value: 0.85 }
+    uCloudAmt: { value: 0.85 },
+    // How high the cloud sheet sits above the camera, in the same units as the projected
+    // plane. Bigger = the same cloud ends up further away = smaller and higher in the sky.
+    uCloudH: { value: 0.42 },
+    // How much of the sky the deck is allowed to fill. Tuned so a typical view reads at
+    // roughly half cover with real holes in it; the pair only ever moves together.
+    uDensityBias: { value: 0.285 },
+    uCoverLo: { value: 0.32 },
+    uCoverHi: { value: 0.70 }
   };
-
-  // One tiling copy of the cloud sheet for the dome bands; the decks use their own
-  // clones because they need a different repeat.
-  const bandTex = cloudTexture(1).clone();
-  bandTex.wrapS = bandTex.wrapT = THREE.RepeatWrapping;
-  bandTex.generateMipmaps = true;
-  bandTex.minFilter = THREE.LinearMipmapLinearFilter;
-  bandTex.magFilter = THREE.LinearFilter;
-  // The projection stretches hard towards the horizon; without anisotropy the sheet
-  // smears into visible streaks along the ground line.
-  bandTex.anisotropy = 8;
-  bandTex.needsUpdate = true;
-  uniforms.uCloudTex.value = bandTex;
 
   const dome = new THREE.Mesh(
     new THREE.SphereGeometry(SKY_RADIUS, 48, 32),
@@ -162,6 +204,7 @@ export function createSky(scene) {
       uniforms,
       vertexShader: VERT,
       fragmentShader: FRAG,
+      defines: { FBM_OCTAVES: quality === 'lite' ? 3 : 5 },
       side: THREE.BackSide,
       depthWrite: false,
       depthTest: false,
@@ -196,7 +239,10 @@ export function createSky(scene) {
     starGeo,
     new THREE.PointsMaterial({
       color: 0xdce6ff, size: 2.6, sizeAttenuation: false,
-      transparent: true, opacity: 0, depthWrite: false, depthTest: false, fog: false
+      // depthTest has to stay on. A transparent material is drawn *after* the opaque city,
+      // so with the test off the whole field painted itself over the rooftops — stars
+      // shining through towers, which is exactly the "穿模" complaint.
+      transparent: true, opacity: 0, depthWrite: false, depthTest: true, fog: false
     })
   );
   stars.renderOrder = -99;
@@ -211,7 +257,9 @@ export function createSky(scene) {
     transparent: true,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
-    depthTest: false,
+    // Same reason as the star field: a glow drawn over the city must be allowed to fall
+    // behind a tower, otherwise the sun smears across the rooftops in front of it.
+    depthTest: true,
     fog: false
   }));
   halo.renderOrder = -98;
@@ -219,15 +267,15 @@ export function createSky(scene) {
   scene.add(halo);
 
   // ---------------------------------------------------------------- clouds
-  // Four decks. The lowest is what you actually see from the street — a flat layer has to
-  // sit low to reach the horizon at all — and the ones above it are stacked far enough up
-  // that the sky reads as deep instead of as a ceiling. Sizes are held inside the far
-  // plane, so they shrink as the decks rise.
+  // Four decks, lifted well above the tallest tower (the towers top out around 130 m, so the
+  // old 700 m sheet was only five tower-heights up and read as a ceiling). Sizes are pulled
+  // in as they rise so that every corner stays inside the 4200 m far plane — a clipped deck
+  // shows up as a hard straight edge across the sky.
   const DECKS = [
-    { y: 700, size: 5600, repeat: 3.2 },
-    { y: 1150, size: 5300, repeat: 3.4 },
-    { y: 1750, size: 4900, repeat: 3.6 },
-    { y: 2450, size: 4400, repeat: 3.8 }
+    { y: 1150, size: 5200, repeat: 3.2 },
+    { y: 1700, size: 4800, repeat: 3.4 },
+    { y: 2300, size: 4300, repeat: 3.6 },
+    { y: 3000, size: 3800, repeat: 3.8 }
   ];
   const decks = [];
   for (let i = 0; i < DECKS.length; i++) {
@@ -273,16 +321,21 @@ export function createSky(scene) {
       uniforms.uWarm.value = s.warm;
       uniforms.uStars.value = s.stars;
       uniforms.uMoonUp.value = s.moonUp;
-      // Cloud colour has to sit *above* the sky's own value or the bands vanish;
-      // scalars past 1 are fine, the OutputPass tone maps them back into range.
+      // Cloud colour has to sit *above* the sky's own value or the bands vanish; scalars past 1
+      // are fine, the OutputPass tone maps them back into range. The old floor of 0.42 at dusk
+      // put the deck within two luma counts of the sky it was painted on — clouds you cannot
+      // see. Dusk now gets close to full white, tinted peach by the low sun.
       uniforms.uCloudCol.value
         .setRGB(1, 1, 1)
-        .lerp(s.warmSky, 0.20 + s.warm * 0.30)
+        .lerp(s.warmSky, 0.22 + s.warm * 0.34)
         // Night must not reuse the daytime floor: a floor of 0.26 of white, tone mapped at
         // the night exposure, reads as a grey ceiling over the whole city. What is left is a
         // thin moonlit floor so the bands still have an edge against the stars.
-        .multiplyScalar(0.03 + 0.62 * s.daylight + 0.20 * s.warm + 0.09 * s.moonUp * (1 - s.daylight));
-      uniforms.uCloudAmt.value = 0.30 + 0.58 * s.daylight + 0.16 * s.warm;
+        .multiplyScalar(0.10 + 1.15 * s.daylight + 0.55 * s.warm + 0.10 * s.moonUp * (1 - s.daylight));
+      uniforms.uCloudAmt.value = 0.42 + 0.40 * s.daylight + 0.14 * s.warm;
+      // The sheet climbs a little at dusk: a low deck catches the last light and reads as
+      // haze over the rooftops, which is not what the sunset wants behind the towers.
+      uniforms.uCloudH.value = 0.42 + 0.10 * s.warm - 0.06 * s.night;
       uniforms.uSunSize.value = THREE.MathUtils.degToRad(0.62 + s.sunDisc * 0.012);
       uniforms.uTime.value = time;
 

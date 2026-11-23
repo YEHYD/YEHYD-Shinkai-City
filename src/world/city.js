@@ -6,7 +6,9 @@
 
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
-import { groundTexture, facadeTextures, FACADE_VARIANTS, GROUND_TILE_METERS } from '../core/textures.js';
+import {
+  groundMaps, facadeTextures, FACADE_VARIANTS, GROUND_TILE_METERS, styleForBuilding
+} from '../core/textures.js';
 import { makeRandom } from '../core/random.js';
 import { CITY_SIZE, GRID, BAY_W, BAY_H, TILE_BAYS_X, TILE_BAYS_Y, HALF } from './layout.js';
 
@@ -98,17 +100,25 @@ export function buildCity(layout, renderer) {
   const rnd = makeRandom(8801);
 
   // ---------------------------------------------------------------- ground
-  const groundTex = groundTexture();
-  groundTex.repeat.set(CITY_SIZE / GROUND_TILE_METERS, CITY_SIZE / GROUND_TILE_METERS);
-  groundTex.needsUpdate = true;
+  const groundSet = groundMaps();
+  const gRepeat = CITY_SIZE / GROUND_TILE_METERS;
+  for (const t of [groundSet.map, groundSet.bumpMap, groundSet.roughnessMap]) {
+    t.repeat.set(gRepeat, gRepeat);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.needsUpdate = true;
+  }
 
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(CITY_SIZE, CITY_SIZE),
     new THREE.MeshStandardMaterial({
-      map: groundTex,
+      map: groundSet.map,
+      bumpMap: groundSet.bumpMap,
+      bumpScale: 0.55,
+      roughnessMap: groundSet.roughnessMap,
       // Damp asphalt: a little broad reflection of the dusk sky is what keeps the road
-      // from reading as flat grey plastic under a sunset.
-      roughness: 0.76,
+      // from reading as flat grey plastic under a sunset. The wet patches in the
+      // roughness map are what let the sky actually pool on the tarmac.
+      roughness: 1.0,
       metalness: 0.10,
       envMapIntensity: 1.15,
       color: 0xffffff
@@ -120,10 +130,13 @@ export function buildCity(layout, renderer) {
   group.add(ground);
 
   // ---------------------------------------------------------------- buildings
+  // Grouped by *style* rather than by the random per-building variant: glass towers,
+  // ribbed offices and masonry walk-ups each get their own facade set, so a skyline
+  // that used to be four interchangeable tiles now reads as three kinds of building.
   const wallsByVariant = Array.from({ length: FACADE_VARIANTS }, () => []);
   const roofs = [];
   for (const b of layout.buildings) {
-    wallPieces(b, wallsByVariant[b.variant % FACADE_VARIANTS]);
+    wallPieces(b, wallsByVariant[styleForBuilding(b)]);
     roofs.push(roofPiece(b));
   }
 
@@ -133,15 +146,21 @@ export function buildCity(layout, renderer) {
     if (!wallsByVariant[v].length) continue;
     const merged = BufferGeometryUtils.mergeGeometries(wallsByVariant[v], false);
     merged.computeBoundingSphere();
-    const { map, emissiveMap } = facadeTextures(v);
+    const { map, emissiveMap, bumpMap, roughnessMap } = facadeTextures(v);
     // Every building shares one tile size, so one repeat of the tile per `TILE_W` metres.
-    for (const t of [map, emissiveMap]) { t.repeat.set(1, 1); t.wrapS = t.wrapT = THREE.RepeatWrapping; }
+    for (const t of [map, emissiveMap, bumpMap, roughnessMap]) {
+      t.repeat.set(1, 1);
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    }
     const mat = new THREE.MeshStandardMaterial({
       map,
       emissiveMap,
+      bumpMap,
+      bumpScale: 0.35,
+      roughnessMap,
       emissive: new THREE.Color(0xffd9a0),
       emissiveIntensity: 0.2,
-      roughness: 0.72,
+      roughness: 1.0,
       metalness: 0.14,
       envMapIntensity: 0.85
     });
@@ -317,7 +336,13 @@ export function buildCity(layout, renderer) {
         if (o.geometry) o.geometry.dispose();
         if (o.material) {
           const mats = Array.isArray(o.material) ? o.material : [o.material];
-          for (const m of mats) { m.map?.dispose(); m.emissiveMap?.dispose(); m.dispose(); }
+          for (const m of mats) {
+            m.map?.dispose();
+            m.emissiveMap?.dispose();
+            m.bumpMap?.dispose();
+            m.roughnessMap?.dispose();
+            m.dispose();
+          }
         }
       });
     }

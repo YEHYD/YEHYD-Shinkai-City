@@ -3,86 +3,29 @@
 // No model call, but the shape is the same one an LLM would get: who am I, how do I feel
 // about you, what have I heard about you and from whom. The reply is assembled from those
 // three, so the same question gets a different answer once the street has had time to talk.
+//
+// A conversation runs for three rounds, or four if the character already trusts you. Each
+// round's options depend on what you picked last time, so the exchange actually follows the
+// thread instead of offering the same three buttons.
 
-const TOPICS = {
-  warm: { topic: '你对人说话很温和', tone: 1.0 },
-  curious: { topic: '你很爱打听这条街的事', tone: 0.25 },
-  cold: { topic: '你不太想和人说话', tone: -1.0 }
-};
-
-const OPTIONS = [
-  { tag: 'warm', label: '「今天的天空，你会拍下来吗？」' },
-  { tag: 'curious', label: '「这条街上，最近有什么不对劲的事？」' },
-  { tag: 'cold', label: '「我只是路过。」' }
-];
-
-// Mood bands change how someone responds to the same words.
-const band = mood => (mood > 0.4 ? 'good' : mood < -0.2 ? 'bad' : 'flat');
-
-const REPLIES = {
-  warm: {
-    good: [
-      '「会。而且我会站在同一个地方拍，直到云走完。」',
-      '「拍下来也留不住啊。不过……你说的对，还是想拍。」'
-    ],
-    flat: [
-      '「天空啊。我倒是没怎么抬头看过。」',
-      '「这儿的天色一天一个样。看久了会舍不得走。」'
-    ],
-    bad: [
-      '「……没那个心情。」',
-      '「你要是真觉得好看，就多站一会儿吧。」'
-    ]
-  },
-  curious: {
-    good: [
-      '「有。不过你要是问出来了，别说是我讲的。」',
-      '「巷子尽头那家店，灯整夜不灭。没人知道在做什么。」'
-    ],
-    flat: [
-      '「不对劲的事天天有。看你想听哪一件。」',
-      '「这条街安静太久了，安静本身就是件怪事。」'
-    ],
-    bad: [
-      '「问了也不一定有人愿意答。」',
-      '「你要是只想找话题，去问别人吧。」'
-    ]
-  },
-  cold: {
-    good: [
-      '「嗯。路过也挺好。」',
-      '「随你。不过风大，别站太久。」'
-    ],
-    flat: [
-      '「……」',
-      '「是吗。」'
-    ],
-    bad: [
-      '「那你就路过吧。」',
-      '「行。省得我再解释一遍。」'
-    ]
-  }
-};
-
-const HEARD = {
-  good: [
-    v => `「${v}说你是个不难说话的人。」`,
-    v => `「${v}提过你。说你还挺会挑话头。」`
-  ],
-  bad: [
-    v => `「${v}说你问话的样子像在查户口。」`,
-    v => `「${v}让我别跟你多聊。我倒想自己看看。」`
-  ],
-  flat: [
-    v => `「${v}提起过你。说你在这条街上转了很久。」`,
-    v => `「${v}说这两天见过你。原来就是你。」`
-  ]
-};
+import {
+  INTENTS, REPLIES, VOICE, OPENS, FOLLOW, DEEPEN, LAST,
+  HEARD, ASIDE, FAREWELL, band
+} from './lines.js';
 
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 
 export function createDialogue(social) {
   let active = null;
+  // Lines already spoken in this conversation, so a long talk never repeats itself.
+  let used = new Set();
+
+  function take(pool) {
+    const fresh = pool.filter(l => !used.has(l));
+    const line = fresh.length ? pick(fresh) : pick(pool);
+    used.add(line);
+    return line;
+  }
 
   function opener(node) {
     const memory = social.topMemory(node.id, 0.28);
@@ -97,12 +40,26 @@ export function createDialogue(social) {
     return pick(['「嗯。」', '「今天也在走？」', '「这条街走不腻吗。」']);
   }
 
+  /** Round 0 is the way in; after that the options follow what you just said. */
+  function optionsFor(round, prevTag) {
+    if (round <= 0) return OPENS.filter(o => !used.has(o.label));
+    if (round === 1) return (FOLLOW[prevTag] || DEEPEN).filter(o => !used.has(o.label));
+    if (round === 2) return DEEPEN.filter(o => !used.has(o.label));
+    return LAST.filter(o => !used.has(o.label));
+  }
+
+  function nodeOf(id) {
+    return social.nodes.get(id);
+  }
+
   return {
     get active() { return active; },
 
     begin(npcId) {
-      const node = social.nodes.get(npcId);
+      const node = nodeOf(npcId);
       if (!node) return null;
+      used = new Set();
+      const rounds = node.trust > 0.55 ? 4 : 3;
       active = {
         npcId,
         name: node.def.name,
@@ -111,9 +68,10 @@ export function createDialogue(social) {
         mood: node.mood,
         trust: node.trust,
         text: opener(node),
-        options: OPTIONS.map(o => ({ ...o })),
+        options: optionsFor(0, null),
         done: false,
-        round: 0
+        round: 0,
+        rounds
       };
       return active;
     },
@@ -122,42 +80,68 @@ export function createDialogue(social) {
     choose(index) {
       if (!active || active.done) return null;
       const opt = active.options[index];
-      if (!opt) return null;
-      const node = social.nodes.get(active.npcId);
-      const t = TOPICS[opt.tag];
+      if (!opt || opt.tag === 'end') return null;
+      const node = nodeOf(active.npcId);
+      if (!node) return null;
+      const intent = INTENTS[opt.tag] || INTENTS.warm;
 
-      social.speak(active.npcId, { topic: t.topic, tone: t.tone, text: opt.label });
+      // What you say late in a conversation lands harder than small talk.
+      const weight = active.round === 0 ? 1 : 1.15;
+      const tone = Math.max(-1, Math.min(1, intent.tone * weight));
+      social.speak(active.npcId, { topic: intent.topic, tone, text: opt.label });
+      used.add(opt.label);
 
       const mood = band(node.mood);
-      let reply = pick(REPLIES[opt.tag][mood]);
+      const depth = active.round === 0 ? 'light' : 'deep';
+      let reply = take(REPLIES[opt.tag][depth][mood]);
+
+      // Splice in this character's own voice on follow-up rounds.
+      const voice = VOICE[node.id];
+      if (active.round >= 1 && voice && Math.random() < 0.55) {
+        reply += `\n${take(voice)}`;
+      }
 
       // Occasionally let them pull a neighbour into it — this is what makes the street
       // feel like it has people in it rather than one NPC at a time.
       const ns = social.neighbours(node.id);
-      if (ns.length && Math.random() < 0.55) {
+      if (active.round >= 1 && ns.length && Math.random() < 0.5) {
         const otherId = ns[Math.floor(Math.random() * ns.length)];
         const other = social.nodes.get(otherId);
         if (other) {
           const kind = node.edges[otherId];
-          const lead = kind === 'rival' ? '别跟' : kind === 'sibling' ? '我兄妹' : '你还没见过';
-          const tail = kind === 'rival'
-            ? `${other.def.name}提这事。他会记仇。`
-            : kind === 'sibling'
-              ? `${other.def.name}吧？他去那边了。`
-              : `${other.def.name}吗？就在这附近。`;
-          reply += `\n${lead}${tail}`;
+          if (Math.random() < 0.5) {
+            const lead = kind === 'rival' ? '别跟' : kind === 'sibling' ? '我兄妹' : '你还没见过';
+            const tail = kind === 'rival'
+              ? `${other.def.name}提这事。他会记仇。`
+              : kind === 'sibling'
+                ? `${other.def.name}吧？他去那边了。`
+                : `${other.def.name}吗？就在这附近。`;
+            reply += `\n${lead}${tail}`;
+          } else {
+            reply += take(ASIDE[mood])(other.def.name);
+          }
         }
       }
 
       active.round++;
-      active.done = true;
+      active.mood = node.mood;
+      active.trust = node.trust;
       active.text = reply;
-      active.options = [{ tag: 'end', label: '（结束对话）' }];
+
+      if (active.round >= active.rounds) {
+        active.done = true;
+        active.text += `\n${take(FAREWELL[mood])}`;
+        active.options = [{ tag: 'end', label: '（结束对话）' }];
+      } else {
+        const options = optionsFor(active.round, opt.tag);
+        active.options = options.length ? options : [{ tag: 'end', label: '（结束对话）' }];
+      }
       return reply;
     },
 
     end() {
       active = null;
+      used = new Set();
     },
 
     /** For the debug console: what does everyone currently believe? */
