@@ -479,11 +479,14 @@ export function buildFrontage(layout, { quality = 'full' } = {}) {
       const w = s.warm;
       // Shop interiors are the main source of street warmth; they stay on a little at
       // dusk and read as "open" without blowing out via bloom.
-      shopMat.emissiveIntensity = 0.05 + 0.62 * Math.pow(n, 1.2) + 0.42 * w;
-      boardMat.emissiveIntensity = 0.07 + 0.62 * n + 0.35 * w;
-      vendFaceMat.emissiveIntensity = 0.09 + 0.44 * n + 0.30 * w;
-      poolMat.opacity = 0.24 * Math.pow(n, 1.3) + 0.16 * w;
-      neonMat.color.setScalar(0.34 + 0.44 * n + 0.30 * w);
+      // "光韵" pass: every self-lit surface here also feeds the bloom pass, so pulling
+      // these down is what actually removes the glow — lowering bloom alone just leaves
+      // flat bright panels behind. Values are ~30% under the previous ones on purpose.
+      shopMat.emissiveIntensity = 0.05 + 0.50 * Math.pow(n, 1.2) + 0.32 * w;
+      boardMat.emissiveIntensity = 0.06 + 0.50 * n + 0.28 * w;
+      vendFaceMat.emissiveIntensity = 0.08 + 0.36 * n + 0.24 * w;
+      poolMat.opacity = 0.22 * Math.pow(n, 1.3) + 0.13 * w;
+      neonMat.color.setScalar(0.30 + 0.38 * n + 0.24 * w);
     },
     dispose() {
       group.traverse(o => {

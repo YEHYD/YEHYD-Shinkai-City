@@ -207,6 +207,13 @@ function createOccupancy() {
   };
 }
 
+/** Distance from a coordinate to the nearest road centre line on that axis, in metres.
+ *  Roads sit at `k * CELL - HALF`, so the fractional part of the cell index is the offset. */
+function roadOffset(v) {
+  const u = (v + HALF) / CELL;
+  return Math.abs(u - Math.round(u)) * CELL;
+}
+
 function streetProps(rnd, plazas, occ) {
   const props = { vending: [], poles: [], wires: [], signals: [], benches: [], trees: [] };
 
@@ -220,35 +227,51 @@ function streetProps(rnd, plazas, occ) {
 
     for (const side of [-1, 1]) {
       // --- street trees on the kerb line, every 18 m, both directions
+      // The along-street coordinate is the one that matters: a tree 6.45 m off *this* road
+      // can still be standing in the middle of the perpendicular carriageway, which is what
+      // every junction looked like before. Require 1.15 m of clearance past the kerb of the
+      // crossing road on either end of the block.
       for (let t = -HALF + 12 + (k % 2) * 9; t < HALF - 8; t += 18) {
-        occ.place(props.trees, {
-          x: line + side * CURB + rnd.range(-0.15, 0.15),
-          z: t + rnd.range(-1.2, 1.2),
-          kind: 'street', scale: rnd.range(0.85, 1.2), seed: rnd.next()
-        }, 0.8);
-        occ.place(props.trees, {
-          x: t + rnd.range(-1.2, 1.2),
-          z: line + side * CURB + rnd.range(-0.15, 0.15),
-          kind: 'street', scale: rnd.range(0.85, 1.2), seed: rnd.next()
-        }, 0.8);
+        const jz = t + rnd.range(-1.2, 1.2);
+        const jx = t + rnd.range(-1.2, 1.2);
+        if (roadOffset(jz) > ROAD_HALF + 1.15) {
+          occ.place(props.trees, {
+            x: line + side * CURB + rnd.range(-0.12, 0.12),
+            z: jz,
+            kind: 'street', scale: rnd.range(0.82, 1.08), seed: rnd.next()
+          }, 0.68);
+        }
+        if (roadOffset(jx) > ROAD_HALF + 1.15) {
+          occ.place(props.trees, {
+            x: jx,
+            z: line + side * CURB + rnd.range(-0.12, 0.12),
+            kind: 'street', scale: rnd.range(0.82, 1.08), seed: rnd.next()
+          }, 0.68);
+        }
       }
 
       // --- vending machines: frequent enough to read as a Japanese street, sparse enough
       // that the eye is not tripping over them
       for (let t = -HALF + 16; t < HALF; t += 24) {
         if (rnd.chance(0.22)) {
-          occ.place(props.vending, {
-            x: line + side * VEND_OFF,
-            z: t + rnd.range(-5, 5),
-            yaw: side > 0 ? -Math.PI / 2 : Math.PI / 2
-          }, 0.62);
+          const vx = t + rnd.range(-5, 5);
+          if (roadOffset(vx) > ROAD_HALF + 1.0) {
+            occ.place(props.vending, {
+              x: line + side * VEND_OFF,
+              z: vx,
+              yaw: side > 0 ? -Math.PI / 2 : Math.PI / 2
+            }, 0.62);
+          }
         }
         if (rnd.chance(0.22)) {
-          occ.place(props.vending, {
-            x: t + rnd.range(-5, 5),
-            z: line + side * VEND_OFF,
-            yaw: side > 0 ? Math.PI : 0
-          }, 0.62);
+          const vz = t + rnd.range(-5, 5);
+          if (roadOffset(vz) > ROAD_HALF + 1.0) {
+            occ.place(props.vending, {
+              x: vz,
+              z: line + side * VEND_OFF,
+              yaw: side > 0 ? Math.PI : 0
+            }, 0.62);
+          }
         }
       }
 

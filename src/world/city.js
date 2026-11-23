@@ -319,12 +319,14 @@ export function buildCity(layout, renderer) {
       const lit = s.night + s.warm * 0.6;
       if (Math.abs(lit - lastNight) < 0.004) return;
       lastNight = lit;
-      headMat.emissiveIntensity = 0.22 + 2.3 * s.night + 1.20 * s.warm;
+      // Lamp heads are the brightest thing on the street; they still need to read as
+      // sources, but the previous values pushed them past the bloom threshold into a wash.
+      headMat.emissiveIntensity = 0.20 + 1.85 * s.night + 0.85 * s.warm;
       for (const mat of wallMaterials) {
         // Lit windows come up as the sky goes down, and never switch off entirely.
-        // Kept below the bloom threshold on purpose: window grids are dense, and at 4.4
-        // every tower smeared into one bright wash after dark.
-        mat.emissiveIntensity = 0.05 + 1.55 * Math.pow(s.night, 1.35) + 0.45 * s.warm;
+        // Kept below the bloom threshold on purpose: window grids are dense, and a high
+        // value turns every tower into one bright wash after dark.
+        mat.emissiveIntensity = 0.05 + 1.28 * Math.pow(s.night, 1.35) + 0.34 * s.warm;
       }
       signGroup.visible = true;
       for (const m of signGroup.children) {

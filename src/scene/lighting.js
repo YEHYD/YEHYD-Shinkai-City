@@ -126,7 +126,7 @@ export function createLighting(renderer, scene, opts = {}) {
       // overall level with a gentler ratio, so sun-facing walls stop glaring and the shadow
       // side keeps its detail.
       bounce.color.copy(s.lightColor).lerp(s.hemiSky, 0.45);
-      bounce.intensity = 0.21 + 0.50 * s.warm + 0.23 * s.night;
+      bounce.intensity = 0.21 + 0.50 * s.warm + 0.36 * s.night;
 
       // --- fog + exposure
       fog.color.copy(s.fog);

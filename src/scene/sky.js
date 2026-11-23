@@ -347,7 +347,7 @@ export function createSky(scene, opts = {}) {
       halo.position.copy(s.sunDir).multiplyScalar(SKY_RADIUS * 0.9);
       halo.visible = s.sunDir.y > -0.12;
       const low = 1 - Math.max(0, Math.min(1, s.sunDir.y / 0.4));
-      halo.material.color.copy(s.sunGlow).multiplyScalar(0.55 + 0.75 * low);
+      halo.material.color.copy(s.sunGlow).multiplyScalar(0.38 + 0.52 * low);
       halo.scale.setScalar(700 + 520 * low);
 
       for (const d of decks) {

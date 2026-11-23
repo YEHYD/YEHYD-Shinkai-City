@@ -49,8 +49,12 @@ export function createComposer(renderer, scene, camera, opts = {}) {
       // Wider and weaker than before: the halo should be a breath around a lamp, not a
       // white disc. A higher threshold keeps mid-bright concrete and glass out of it
       // entirely, which is where most of the "too harsh" came from.
-      const strength = 0.19 + 0.29 * s.night + 0.09 * s.warm;
-      const radius = 0.68 + 0.08 * s.night;
+      // Second pass on "too much glow": the halos were still reading as a haze over the
+      // whole frame rather than light coming off specific lamps. Strength halved again and
+      // the threshold pushed up, so only neon, lamp heads, lit windows and the sun bloom
+      // at all — concrete, glass and lit pavement stay completely out of it.
+      const strength = 0.11 + 0.23 * s.night + 0.05 * s.warm;
+      const radius = 0.60 + 0.10 * s.night;
       if (Math.abs(strength - applied.strength) > 0.01) {
         bloom.strength = strength;
         applied.strength = strength;
@@ -60,7 +64,7 @@ export function createComposer(renderer, scene, camera, opts = {}) {
         applied.radius = radius;
       }
       // Only genuinely bright pixels bloom: neon signs, lamp heads, the sun.
-      bloom.threshold = 0.84 + 0.10 * (1 - s.night);
+      bloom.threshold = 0.88 + 0.06 * (1 - s.night);
     },
     dispose() {
       composer.dispose();
