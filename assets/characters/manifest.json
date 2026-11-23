@@ -1,0 +1,191 @@
+{
+  "npc-bluecat": {
+    "id": "npc-bluecat",
+    "height": 720,
+    "views": {
+      "front": {
+        "w": 569,
+        "h": 720,
+        "aspect": 0.7903
+      },
+      "side": {
+        "w": 569,
+        "h": 720,
+        "aspect": 0.7903
+      },
+      "back": {
+        "w": 569,
+        "h": 720,
+        "aspect": 0.7903
+      }
+    }
+  },
+  "npc-dragon": {
+    "id": "npc-dragon",
+    "height": 720,
+    "views": {
+      "front": {
+        "w": 534,
+        "h": 720,
+        "aspect": 0.7417
+      },
+      "side": {
+        "w": 534,
+        "h": 720,
+        "aspect": 0.7417
+      },
+      "back": {
+        "w": 534,
+        "h": 720,
+        "aspect": 0.7417
+      }
+    }
+  },
+  "npc-fan": {
+    "id": "npc-fan",
+    "height": 720,
+    "views": {
+      "front": {
+        "w": 606,
+        "h": 720,
+        "aspect": 0.8417
+      },
+      "side": {
+        "w": 606,
+        "h": 720,
+        "aspect": 0.8417
+      },
+      "back": {
+        "w": 606,
+        "h": 720,
+        "aspect": 0.8417
+      }
+    }
+  },
+  "npc-goth": {
+    "id": "npc-goth",
+    "height": 720,
+    "views": {
+      "front": {
+        "w": 539,
+        "h": 720,
+        "aspect": 0.7486
+      },
+      "side": {
+        "w": 539,
+        "h": 720,
+        "aspect": 0.7486
+      },
+      "back": {
+        "w": 539,
+        "h": 720,
+        "aspect": 0.7486
+      }
+    }
+  },
+  "npc-kpiano": {
+    "id": "npc-kpiano",
+    "height": 720,
+    "views": {
+      "front": {
+        "w": 592,
+        "h": 720,
+        "aspect": 0.8222
+      },
+      "side": {
+        "w": 592,
+        "h": 720,
+        "aspect": 0.8222
+      },
+      "back": {
+        "w": 592,
+        "h": 720,
+        "aspect": 0.8222
+      }
+    }
+  },
+  "npc-maid": {
+    "id": "npc-maid",
+    "height": 720,
+    "views": {
+      "front": {
+        "w": 479,
+        "h": 720,
+        "aspect": 0.6653
+      },
+      "side": {
+        "w": 479,
+        "h": 720,
+        "aspect": 0.6653
+      },
+      "back": {
+        "w": 479,
+        "h": 720,
+        "aspect": 0.6653
+      }
+    }
+  },
+  "npc-mermaid": {
+    "id": "npc-mermaid",
+    "height": 720,
+    "views": {
+      "front": {
+        "w": 658,
+        "h": 720,
+        "aspect": 0.9139
+      },
+      "side": {
+        "w": 658,
+        "h": 720,
+        "aspect": 0.9139
+      },
+      "back": {
+        "w": 658,
+        "h": 720,
+        "aspect": 0.9139
+      }
+    }
+  },
+  "npc-vampire": {
+    "id": "npc-vampire",
+    "height": 720,
+    "views": {
+      "front": {
+        "w": 592,
+        "h": 720,
+        "aspect": 0.8222
+      },
+      "side": {
+        "w": 592,
+        "h": 720,
+        "aspect": 0.8222
+      },
+      "back": {
+        "w": 592,
+        "h": 720,
+        "aspect": 0.8222
+      }
+    }
+  },
+  "player": {
+    "id": "player",
+    "height": 900,
+    "views": {
+      "front": {
+        "w": 647,
+        "h": 900,
+        "aspect": 0.7189
+      },
+      "side": {
+        "w": 647,
+        "h": 900,
+        "aspect": 0.7189
+      },
+      "back": {
+        "w": 647,
+        "h": 900,
+        "aspect": 0.7189
+      }
+    }
+  }
+}

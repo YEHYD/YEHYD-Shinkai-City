@@ -1,0 +1,14 @@
+# Normalise line endings so Windows checkouts and the Linux CI runner agree.
+* text=auto eol=lf
+
+# Binary / generated assets
+*.webp binary
+*.png binary
+*.jpg binary
+*.exe binary
+*.bat text eol=crlf
+
+# The single-file build output and vendored three.js are large and must not be
+# diffed as text.
+*.min.js -text
+vendor/three/** -text

@@ -1,0 +1,59 @@
+# Deploy the single-file demo to GitHub Pages.
+#
+# Why this shape: dist/index.html is fully self-contained (all JS, three.js and the 27
+# character drawings inlined, zero network requests), so GitHub Pages only has to serve
+# one static file. The build runs here so the deployed page can never lag behind src/.
+#
+# Setup once in the repo: Settings -> Pages -> Build and deployment -> Source: GitHub Actions.
+# Pushing to main then publishes https://<user>.github.io/<repo>/.
+#
+# Alternative without Actions: commit dist/index.html as the repo-root index.html plus an
+# empty .nojekyll, then set Source: Deploy from a branch -> main / (root).
+
+name: Deploy demo to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # tools/esbuild.exe is the Windows binary; the runner is Linux, so install the
+      # matching build and point the bundler at it (tools/build-single.mjs honours $ESBUILD).
+      - name: Install esbuild
+        run: npm install --no-save --no-audit --no-fund esbuild@0.28.2
+
+      - name: Build dist/index.html
+        env:
+          ESBUILD: ./node_modules/.bin/esbuild
+        run: node tools/build-single.mjs
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

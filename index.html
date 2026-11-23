@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shinkai City</title>
+<!-- Inline icon: hosting somewhere (GitHub Pages, a static bucket) would otherwise make the
+     browser ask for /favicon.ico at the origin root and log a 404. Nothing is fetched here. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23f6a06a'/%3E%3Ccircle cx='21' cy='12' r='4.4' fill='%23fff4e0'/%3E%3Crect y='20' width='32' height='12' fill='%2346506e'/%3E%3Crect x='5' y='15' width='4' height='12' fill='%2346506e'/%3E%3Crect x='13' y='11' width='4' height='16' fill='%2346506e'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --ink: #eaf2ff;
+    --dim: rgba(234, 242, 255, .55);
+    --panel: rgba(9, 14, 26, .52);
+    --line: rgba(160, 190, 230, .22);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #05070d; }
+  body {
+    font: 13px/1.5 "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  #view { display: block; width: 100%; height: 100%; }
+
+  /* ---------- loading ---------- */
+  #boot {
+    position: fixed; inset: 0; z-index: 40;
+    display: grid; place-content: center; gap: 18px; justify-items: center;
+    background: radial-gradient(120% 90% at 50% 45%, #16233d 0%, #070a12 70%);
+    transition: opacity .7s ease, visibility .7s;
+  }
+  #boot.gone { opacity: 0; visibility: hidden; }
+  #boot h1 {
+    font-size: 26px; font-weight: 300; letter-spacing: .34em;
+    text-transform: uppercase; color: #dfe9ff;
+  }
+  #boot .sub { font-size: 12px; letter-spacing: .18em; color: var(--dim); }
+  #bar { width: 220px; height: 2px; background: rgba(255, 255, 255, .12); overflow: hidden; }
+  #bar i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, #6fa8ff, #ffd9a8); transition: width .25s; }
+
+  /* ---------- hud ---------- */
+  .hud { position: fixed; z-index: 20; pointer-events: none; }
+  #hud-tl { top: 20px; left: 22px; }
+  #hud-tl .city { font-size: 15px; letter-spacing: .26em; text-transform: uppercase; opacity: .92; }
+  #hud-tl .meta { margin-top: 7px; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #hud-tl .meta b { color: var(--ink); font-weight: 500; }
+
+  #hud-br {
+    right: 22px; bottom: 20px; text-align: right;
+    font-size: 11.5px; color: var(--dim); font-variant-numeric: tabular-nums;
+  }
+  #hud-br .k {
+    display: inline-block; min-width: 18px; padding: 1px 5px; margin-left: 4px;
+    border: 1px solid var(--line); border-radius: 3px; color: var(--ink);
+    background: var(--panel); font-size: 10.5px;
+  }
+  #hud-br .row + .row { margin-top: 4px; }
+
+  #hint {
+    left: 22px; bottom: 20px; font-size: 11.5px; color: var(--dim);
+    letter-spacing: .04em;
+  }
+  #hint kbd {
+    font: inherit; padding: 1px 5px; border: 1px solid var(--line);
+    border-radius: 3px; background: var(--panel); color: var(--ink);
+  }
+
+  /* crosshair-ish focus ring for the nearest npc */
+  #focus {
+    position: fixed; z-index: 21; left: 50%; bottom: 92px; transform: translateX(-50%);
+    padding: 7px 16px; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--panel); backdrop-filter: blur(9px);
+    font-size: 12.5px; letter-spacing: .08em; white-space: nowrap;
+    opacity: 0; transition: opacity .22s, transform .22s;
+    pointer-events: none;
+  }
+  #focus.on { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+  #focus .who { color: #ffe3b8; }
+  #focus .act { color: var(--dim); margin-left: 8px; font-size: 11px; }
+
+  /* ---------- conversation ---------- */
+  #talk {
+    position: fixed; inset: auto 0 0 0; z-index: 30;
+    display: grid; justify-items: center; padding: 0 0 26px;
+    opacity: 0; transform: translateY(16px); pointer-events: none;
+    transition: opacity .26s ease, transform .26s ease;
+  }
+  #talk.on { opacity: 1; transform: none; pointer-events: auto; }
+
+  .talk-card {
+    width: min(880px, calc(100% - 44px));
+    display: grid; grid-template-columns: 116px 1fr; gap: 18px;
+    padding: 16px 18px; border-radius: 14px;
+    border: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(12,18,32,.86), rgba(7,10,18,.92));
+    backdrop-filter: blur(14px);
+    box-shadow: 0 24px 70px rgba(0,0,0,.55);
+  }
+  .talk-face {
+    width: 116px; height: 146px; border-radius: 10px;
+    background-color: rgba(255,255,255,.045);
+    background-size: cover; background-position: 50% 3%; background-repeat: no-repeat;
+    box-shadow: inset 0 0 0 1px var(--line), 0 0 34px -12px var(--accent, #ffd9a8);
+  }
+  .talk-name { font-size: 15px; letter-spacing: .18em; color: var(--accent, #ffe3b8); }
+  .talk-name span { margin-left: 10px; font-size: 11px; letter-spacing: .12em; color: var(--dim); }
+  .talk-name span::before { content: '· '; }
+  .talk-text {
+    margin-top: 9px; min-height: 62px;
+    font-size: 14px; line-height: 1.9; white-space: pre-line; color: #eef4ff;
+    text-shadow: 0 1px 12px rgba(0,0,0,.6);
+  }
+  .talk-options { margin-top: 12px; display: grid; gap: 6px; opacity: 0; transition: opacity .18s; }
+  .talk-options.in { opacity: 1; }
+  .talk-options button {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; padding: 9px 12px; text-align: left;
+    font: inherit; font-size: 13px; color: #dbe6fb;
+    background: rgba(255,255,255,.035); border: 1px solid rgba(160,190,230,.16);
+    border-radius: 8px; cursor: pointer;
+    transition: background .16s, border-color .16s, transform .16s;
+  }
+  .talk-options button i {
+    font-style: normal; font-size: 10.5px; color: var(--dim);
+    min-width: 15px; height: 15px; line-height: 15px; text-align: center;
+    border: 1px solid var(--line); border-radius: 4px;
+  }
+  .talk-options button:hover, .talk-options button:focus-visible {
+    background: rgba(255,225,180,.10); border-color: rgba(255,210,150,.45);
+    outline: none; transform: translateX(2px);
+  }
+  .talk-options button.end { color: var(--dim); }
+
+  /* ---------- street feed: what the city is saying behind your back ---------- */
+  #feed {
+    left: 22px; bottom: 52px; z-index: 19;
+    display: grid; gap: 3px; max-width: 380px;
+    font-size: 11px; color: rgba(214,228,250,.5);
+    pointer-events: none;
+  }
+  #feed div {
+    opacity: 0; transform: translateY(4px);
+    animation: feedIn .4s ease forwards;
+    text-shadow: 0 1px 8px rgba(0,0,0,.8);
+  }
+  #feed div.out { animation: feedOut .5s ease forwards; }
+  @keyframes feedIn { to { opacity: 1; transform: none; } }
+  @keyframes feedOut { to { opacity: 0; transform: translateY(-4px); } }
+
+  /* ---------- teleport map ---------- */
+  #map {
+    position: fixed; inset: 0; z-index: 40;
+    display: grid; place-items: center;
+    background: radial-gradient(80% 70% at 50% 40%, rgba(6,10,18,.72), rgba(4,6,11,.90));
+    backdrop-filter: blur(5px);
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  #map.on { opacity: 1; pointer-events: auto; }
+  .map-card {
+    width: min(760px, calc(100vw - 40px));
+    padding: 18px 18px 14px;
+    border: 1px solid var(--line); border-radius: 14px;
+    background: rgba(12,16,24,.86);
+    box-shadow: 0 30px 80px rgba(0,0,0,.6);
+    display: grid; gap: 12px; justify-items: center;
+  }
+  .map-head {
+    width: 100%; display: grid; gap: 3px;
+    font-size: 12px; color: var(--dim);
+  }
+  .map-head b { font-size: 14px; color: #f4ead9; font-weight: 600; letter-spacing: .04em; }
+  .map-head kbd {
+    font: inherit; font-size: 10.5px; padding: 0 4px;
+    border: 1px solid var(--line); border-radius: 4px; color: #e8e0d2;
+  }
+  .map-canvas { line-height: 0; border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,231,196,.14); }
+  .map-canvas canvas { cursor: crosshair; display: block; }
+  .map-chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+  .map-chip {
+    --dot: #ffe3b8;
+    font: inherit; font-size: 11.5px; color: #e6dfd2; cursor: pointer;
+    padding: 4px 10px 4px 8px; border-radius: 999px;
+    border: 1px solid var(--line); background: rgba(255,255,255,.03);
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: background .15s, border-color .15s;
+  }
+  .map-chip::before {
+    content: ''; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--dot); box-shadow: 0 0 8px var(--dot);
+  }
+  .map-chip:hover, .map-chip:focus-visible {
+    background: rgba(255,225,180,.12); border-color: rgba(255,210,150,.45); outline: none;
+  }
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/addons/"
+  }
+}
+</script>
+</head>
+<body>
+
+<canvas id="view"></canvas>
+
+<div id="hud-tl" class="hud">
+  <div class="city">Shinkai City</div>
+  <div class="meta">
+    <span id="clock">06:00</span> · <span id="phase">清晨</span>
+    <br><span id="district">中央大道</span> · <b id="fps">–</b> fps
+  </div>
+</div>
+
+<div id="hint" class="hud">
+  <kbd>W A S D</kbd> 移动 &nbsp;·&nbsp; <kbd>Shift</kbd> 跑 &nbsp;·&nbsp;
+  <kbd>拖动</kbd> 环视 &nbsp;·&nbsp; <kbd>滚轮</kbd> 远近 &nbsp;·&nbsp;
+  <kbd>E</kbd> 交谈 &nbsp;·&nbsp; <kbd>V</kbd> 俯瞰 &nbsp;·&nbsp; <kbd>M</kbd> 地图 &nbsp;·&nbsp;
+  <kbd>[</kbd> <kbd>]</kbd> 调时间
+</div>
+
+<div id="feed" class="hud"></div>
+
+<div id="hud-br" class="hud">
+  <div class="row"><span id="pos">0, 0</span><span class="k" id="drawcalls">–</span></div>
+  <div class="row">NPC <span class="k" id="npccount">0</span></div>
+</div>
+
+<div id="focus"><span class="who"></span><span class="act">· 按 E 交谈</span></div>
+
+<div id="boot">
+  <h1>Shinkai City</h1>
+  <div class="sub" id="bootmsg">正在建造城市</div>
+  <div id="bar"><i></i></div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
