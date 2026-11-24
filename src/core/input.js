@@ -72,7 +72,11 @@ export function createInput(canvas) {
   };
   const onMouseMove = e => {
     if (!locked) return;
-    state.lookX += (e.movementX || 0) * LOCK_SENS;
+    // Moving the mouse right (movementX > 0) must swing the view right, so the horizontal
+    // delta is subtracted: `yaw` grows counter-clockwise from above, and yaw += x turned
+    // the camera the wrong way (left input, right turn). Vertical stays as-is: mouse down
+    // looks down.
+    state.lookX -= (e.movementX || 0) * LOCK_SENS;
     state.lookY += (e.movementY || 0) * LOCK_SENS;
   };
 
@@ -85,12 +89,17 @@ export function createInput(canvas) {
     dragging = true;
     pid = e.pointerId;
     lastX = e.clientX; lastY = e.clientY;
-    canvas.setPointerCapture?.(e.pointerId);
+    // A pointer can already be gone by the time we get here (a fast tap, or a synthetic
+    // event from automation) and then setPointerCapture throws. Losing the capture only
+    // costs us the drag continuing outside the canvas, so swallow it instead of letting
+    // an exception escape the handler.
+    try { canvas.setPointerCapture?.(e.pointerId); } catch { /* no active pointer */ }
     canvas.style.cursor = 'grabbing';
   };
   const onPointerMove = e => {
     if (locked || !dragging || e.pointerId !== pid) return;
-    state.lookX += e.clientX - lastX;
+    // Same mapping as the locked path, so switching between the two never flips the feel.
+    state.lookX -= e.clientX - lastX;
     state.lookY += e.clientY - lastY;
     lastX = e.clientX; lastY = e.clientY;
   };
