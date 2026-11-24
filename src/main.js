@@ -186,7 +186,7 @@ async function start() {
 
   for (const def of NPCS) {
     if (!sprites[def.id]) continue;
-    const a = createActor(def, sprites[def.id]);
+    const a = createActor(def, sprites[def.id], { marker: true });
     scene.add(a.group);
     actors.push(a);
   }
@@ -242,10 +242,13 @@ async function start() {
     if (!convo) return;
     panel.show(convo);
     hud.focus(null);
+    a.setMarker(false);   // the mark has done its job once you are in the conversation
     input.exitLock();     // you need the cursor to click the options
   }
 
   function closeTalk() {
+    const who = convo && actorById.get(convo.npcId);
+    if (who) who.setMarker(true);
     convo = null;
     panel.close();
     dialogue.end();
