@@ -208,3 +208,99 @@ export const PERSONA = {
     close: ['「喝完再走。不急。」', '「下次不用点了。我知道你要什么。」']
   }
 };
+
+// The four ways in, per character. Round 0 is what the player reads before saying anything,
+// so it is the single strongest place a shared pool shows through — everyone here gets their
+// own set, in their own register, with the same four intents so the follow-up tree still works.
+export const OPENS_BY_NPC = {
+  'npc-maid': [
+    { tag: 'warm', label: '「今天也站了一整天吧。累不累？」' },
+    { tag: 'curious', label: '「这一带最近有什么新鲜事吗？」' },
+    { tag: 'tease', label: '「围裙上那是面粉，还是别的什么？」' },
+    { tag: 'cold', label: '「我只是想找个地方站一会儿。」' }
+  ],
+  'npc-bluecat': [
+    { tag: 'warm', label: '「那对耳朵，真的听得见我吗？」' },
+    { tag: 'curious', label: '「这条街上，谁最不好惹？」' },
+    { tag: 'tease', label: '「别装了。你刚才在偷看我吧。」' },
+    { tag: 'cold', label: '「我不打扰你数车。」' }
+  ],
+  'npc-fan': [
+    { tag: 'warm', label: '「光斜过来的时候，这条街确实好看。」' },
+    { tag: 'curious', label: '「那些招牌，都是谁写的？」' },
+    { tag: 'tease', label: '「扇子一直没打开。是舍不得，还是不会？」' },
+    { tag: 'cold', label: '「我只站一会儿。」' }
+  ],
+  'npc-goth': [
+    { tag: 'warm', label: '「灯下面太亮了。要不要往这边站？」' },
+    { tag: 'curious', label: '「第六层为什么一直没人？」' },
+    { tag: 'tease', label: '「你连影子都不太愿意跟人走。」' },
+    { tag: 'cold', label: '「我路过而已。」' }
+  ],
+  'npc-kpiano': [
+    { tag: 'warm', label: '「刚才那段，能再弹一次吗？」' },
+    { tag: 'curious', label: '「夜里这条街，还有别人弹琴吗？」' },
+    { tag: 'tease', label: '「弹错了也不肯承认，是吧。」' },
+    { tag: 'cold', label: '「我不吵你练琴。」' }
+  ],
+  'npc-dragon': [
+    { tag: 'warm', label: '「站这么高，风是不是不一样？」' },
+    { tag: 'curious', label: '「你活了多久？这条街以前什么样？」' },
+    { tag: 'tease', label: '「那对角是真的，还是装饰？」' },
+    { tag: 'cold', label: '「我只是上来看看。」' }
+  ],
+  'npc-vampire': [
+    { tag: 'warm', label: '「这个点出门，你也不怕晒？」' },
+    { tag: 'curious', label: '「天亮之后，你去哪儿？」' },
+    { tag: 'tease', label: '「影子跟不上你，是嫌你走太快？」' },
+    { tag: 'cold', label: '「我马上就走。」' }
+  ],
+  'npc-mermaid': [
+    { tag: 'warm', label: '「陆地上的风，你习惯了吗？」' },
+    { tag: 'curious', label: '「河底真的有台阶吗？」' },
+    { tag: 'tease', label: '「你身上……好像有点潮。」' },
+    { tag: 'cold', label: '「我不下水。」' }
+  ],
+  'npc-lotus': [
+    { tag: 'warm', label: '「这些花，都是你一个人照看的？」' },
+    { tag: 'curious', label: '「这条街的土，是从哪儿运来的？」' },
+    { tag: 'tease', label: '「花听得见人说话，那我说你坏话呢？」' },
+    { tag: 'cold', label: '「我不碰花。」' }
+  ],
+  'npc-inkstone': [
+    { tag: 'warm', label: '「这么多书，你都读过吗？」' },
+    { tag: 'curious', label: '「那本没有名字的书，到底是什么？」' },
+    { tag: 'tease', label: '「书商自己其实不看书的吧。」' },
+    { tag: 'cold', label: '「我只是看看。」' }
+  ],
+  'npc-mio': [
+    { tag: 'warm', label: '「这船，今天还开吗？」' },
+    { tag: 'curious', label: '「河中间那个安静的地方，是什么？」' },
+    { tag: 'tease', label: '「你等的人，是不是早就不来了？」' },
+    { tag: 'cold', label: '「我不上船。」' }
+  ],
+  'npc-yuki': [
+    { tag: 'warm', label: '「送信这活儿，累吗？」' },
+    { tag: 'curious', label: '「那封没写名字的信，是谁寄的？」' },
+    { tag: 'tease', label: '「你送的信，自己拆过吗？」' },
+    { tag: 'cold', label: '「我不耽误你送信。」' }
+  ],
+  'npc-scorch': [
+    { tag: 'warm', label: '「炉子灭了，手还烫吗？」' },
+    { tag: 'curious', label: '「那把没有刃的刀，是谁来打的？」' },
+    { tag: 'tease', label: '「这疤，是打铁烫的，还是打架留的？」' },
+    { tag: 'cold', label: '「我不碰你的铁。」' }
+  ],
+  'npc-haze': [
+    { tag: 'warm', label: '「这个时间的颜色，确实留不住。」' },
+    { tag: 'curious', label: '「暗房里，你到底看见过什么？」' },
+    { tag: 'tease', label: '「那张空街的照片，多出来的人是谁？」' },
+    { tag: 'cold', label: '「你忙你的。」' }
+  ],
+  'npc-amber': [
+    { tag: 'warm', label: '「关门前那十分钟，真的最好喝？」' },
+    { tag: 'curious', label: '「这条街上，谁欠谁最多？」' },
+    { tag: 'tease', label: '「每次只点水的那个人，你也记着？」' },
+    { tag: 'cold', label: '「我坐一会儿就走。」' }
+  ]
+};

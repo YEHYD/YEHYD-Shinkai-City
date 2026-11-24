@@ -12,7 +12,7 @@ import {
   INTENTS, REPLIES, VOICE, OPENS, FOLLOW, DEEPEN, LAST,
   HEARD, ASIDE, FAREWELL, band
 } from './lines.js';
-import { PERSONA } from './voices.js';
+import { PERSONA, OPENS_BY_NPC } from './voices.js';
 
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 
@@ -50,8 +50,12 @@ export function createDialogue(social) {
   }
 
   /** Round 0 is the way in; after that the options follow what you just said. */
-  function optionsFor(round, prevTag) {
-    if (round <= 0) return OPENS.filter(o => !used.has(o.label));
+  function optionsFor(round, prevTag, npcId) {
+    if (round <= 0) {
+      // Their own four ways in, so the buttons read like this person's street, not a form.
+      const own = OPENS_BY_NPC[npcId] || OPENS;
+      return own.filter(o => !used.has(o.label));
+    }
     if (round === 1) return (FOLLOW[prevTag] || DEEPEN).filter(o => !used.has(o.label));
     if (round === 2) return DEEPEN.filter(o => !used.has(o.label));
     return LAST.filter(o => !used.has(o.label));
@@ -77,7 +81,7 @@ export function createDialogue(social) {
         mood: node.mood,
         trust: node.trust,
         text: opener(node),
-        options: optionsFor(0, null),
+        options: optionsFor(0, null, npcId),
         done: false,
         round: 0,
         rounds
@@ -148,7 +152,7 @@ export function createDialogue(social) {
         active.text += `\n${bye && bye.length ? take(bye) : take(FAREWELL[mood])}`;
         active.options = [{ tag: 'end', label: '（结束对话）' }];
       } else {
-        const options = optionsFor(active.round, opt.tag);
+        const options = optionsFor(active.round, opt.tag, active.npcId);
         active.options = options.length ? options : [{ tag: 'end', label: '（结束对话）' }];
       }
       return reply;
