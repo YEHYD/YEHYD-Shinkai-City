@@ -493,6 +493,11 @@ async function start() {
     }
     if (frozen) { focusNpc = null; hud.focus(null); }
 
+    // The mark means "you can talk to this one right now", so it is re-derived every frame
+    // rather than toggled by hand: a missed restore can no longer strand a marker off.
+    for (let i = 0; i < actors.length; i++) {
+      actors[i].setMarker(!convo || convo.npcId !== actors[i].def.id);
+    }
     for (let i = 0; i < actors.length; i++) actors[i].update(camera, s, time);
     crowd.update(camera, s, sdt, time);
     traffic.update(camera, s, sdt, player.position);

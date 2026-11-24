@@ -282,13 +282,13 @@ export function createActor(def, views, opts = {}) {
       if (marker) {
         marker.rotation.y = toCamYaw;
         const near = Math.hypot(dx, dz);
-        const fade = near > 36 ? Math.max(0, 1 - (near - 36) / 28) : 1;
+        const fade = near > 90 ? Math.max(0, 1 - (near - 90) / 45) : 1;
         marker.visible = state.markerOn && fade > 0.02;
         marker.material.opacity = fade;
         // The mark is an overlay, not part of the world: it keeps roughly the same size on
         // screen whether the character is two metres away or across the street, and only
         // stops growing when it is close enough to be larger than the head it sits over.
-        const size = Math.min(1.8, Math.max(0.62, near * 0.050));
+        const size = Math.min(2.4, Math.max(0.62, near * 0.050));
         const beat = t * 2.15 + state.bobPhase;
         marker.position.y = def.height + 0.30 + size * 0.55 + Math.sin(beat) * 0.035;
         marker.scale.set(size, size * (1 + Math.sin(beat) * 0.045), 1);

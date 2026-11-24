@@ -12,6 +12,7 @@ import {
   INTENTS, REPLIES, VOICE, OPENS, FOLLOW, DEEPEN, LAST,
   HEARD, ASIDE, FAREWELL, band
 } from './lines.js';
+import { PERSONA } from './voices.js';
 
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 
@@ -34,7 +35,15 @@ export function createDialogue(social) {
       const b = memory.tone > 0.3 ? 'good' : memory.tone < -0.2 ? 'bad' : 'flat';
       return pick(HEARD[b])(via);
     }
-    if (node.talkedTo === 0) return `「${node.def.line}」`;
+    // Each resident has their own way in; the shared greetings are only the floor.
+    const persona = PERSONA[node.id];
+    if (node.talkedTo === 0) {
+      const own = persona && persona.open;
+      return own && own.length ? `「${take(own)}」` : `「${node.def.line}」`;
+    }
+    if (persona && persona.again && Math.random() < 0.65) {
+      return `「${take(persona.again)}」`;
+    }
     if (node.trust > 0.62) return pick(['「又见面了。」', '「你回来了。」', '「今天走得比昨天慢。」']);
     if (node.trust < 0.28) return pick(['「……有事？」', '「你挡着光了。」']);
     return pick(['「嗯。」', '「今天也在走？」', '「这条街走不腻吗。」']);
@@ -93,7 +102,12 @@ export function createDialogue(social) {
 
       const mood = band(node.mood);
       const depth = active.round === 0 ? 'light' : 'deep';
-      let reply = take(REPLIES[opt.tag][depth][mood]);
+      // Their own answer first, the shared pool only when they have nothing of their own.
+      const persona = PERSONA[node.id];
+      const own = persona && persona.reply[opt.tag];
+      let reply = own && own.length
+        ? take([own[depth === 'deep' ? 1 : 0] || own[0]])
+        : take(REPLIES[opt.tag][depth][mood]);
 
       // Splice in this character's own voice on follow-up rounds.
       const voice = VOICE[node.id];
@@ -130,7 +144,8 @@ export function createDialogue(social) {
 
       if (active.round >= active.rounds) {
         active.done = true;
-        active.text += `\n${take(FAREWELL[mood])}`;
+        const bye = PERSONA[node.id] && PERSONA[node.id].close;
+        active.text += `\n${bye && bye.length ? take(bye) : take(FAREWELL[mood])}`;
         active.options = [{ tag: 'end', label: '（结束对话）' }];
       } else {
         const options = optionsFor(active.round, opt.tag);
