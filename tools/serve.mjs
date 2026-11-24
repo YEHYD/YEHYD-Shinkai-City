@@ -6,7 +6,8 @@
 //   2. Everything is served `no-store`. While tuning shaders you reload twenty times a
 //      minute, and a silently cached old module wastes all of them.
 //
-// Usage: node tools/serve.mjs [--port 8123] [--root .]
+// Usage: node tools/serve.mjs [--port 8123] [--root .] [--host 127.0.0.1]
+// Pass `--host 0.0.0.0` inside a container so the port is reachable from outside.
 
 import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
@@ -20,6 +21,7 @@ const argOf = (name, fallback) => {
 };
 
 const PORT = Number(argOf('port', 8123));
+const HOST = argOf('host', '127.0.0.1');
 const ROOT = resolve(argOf('root', '.'));
 
 const MIME = {
@@ -74,7 +76,7 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, '127.0.0.1', () => {
+server.listen(PORT, HOST, () => {
   console.log(`[serve] ${ROOT}`);
-  console.log(`[serve] http://127.0.0.1:${PORT}/`);
+  console.log(`[serve] http://${HOST}:${PORT}/`);
 });

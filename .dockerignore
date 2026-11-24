@@ -1,0 +1,36 @@
+# Keep the build context small: the image only needs index.html, src/, vendor/, assets/
+# and tools/serve.mjs. Everything below is either a build artefact, source art, or local
+# tooling that the running page never requests.
+
+.git
+.github
+.gitignore
+.gitattributes
+
+# Build output and generated bundles
+dist
+docs
+
+# Local tooling, caches and scratch work
+.tmp
+.mcp
+.memsearch
+.dsh-vision-router
+.npm-cache
+node_modules
+tools/esbuild.exe
+demo
+
+# Raw art / third-party reference projects (see CREDITS.md)
+素材
+characters-src
+thousand-town-main
+yans_little_town-main
+
+# Docs and editor noise
+README.md
+CREDITS.md
+Thumbs.db
+desktop.ini
+.DS_Store
+*.log
