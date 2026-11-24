@@ -243,7 +243,7 @@ async function start() {
     panel.show(convo);
     hud.focus(null);
     a.setMarker(false);   // the mark has done its job once you are in the conversation
-    input.exitLock();     // you need the cursor to click the options
+    releasePointer();     // you need the cursor to click the options
   }
 
   function closeTalk() {
@@ -330,15 +330,24 @@ async function start() {
   const reticle = document.getElementById('reticle');
   let paused = false;
   let everLocked = false;
+  // Releasing the pointer on purpose (a panel opened, the crane shot came up) must not be
+  // mistaken for the player pressing Escape. `releasing` counts the releases we asked for,
+  // because the pointerlockchange event arrives later and cannot tell us who caused it.
+  let releasing = 0;
   function setPaused(on) {
     if (paused === on) return;
     paused = on;
     pauseEl.classList.toggle('on', on);
   }
+  function releasePointer() {
+    if (input.locked) releasing++;
+    input.exitLock();
+  }
   input.onLock(locked => {
     reticle.classList.toggle('on', locked);
-    if (locked) { everLocked = true; setPaused(false); }
-    else if (everLocked && !panel.open && !map.isOpen) setPaused(true);
+    if (locked) { everLocked = true; setPaused(false); return; }
+    if (releasing > 0) { releasing--; return; }
+    if (everLocked && !panel.open && !map.isOpen && !cam.aerial) setPaused(true);
   });
   const grabPointer = () => {
     if (panel.open || map.isOpen || cam.aerial) return;
@@ -371,9 +380,13 @@ async function start() {
     if (input.takePressed('KeyM')) {
       if (talking) closeTalk();
       map.toggle();
-      if (map.isOpen) input.exitLock(); else if (!paused) input.requestLock();
+      if (map.isOpen) releasePointer(); else if (!paused) input.requestLock();
     }
-    if (input.takePressed('KeyV')) { map.close(); cam.toggleAerial(); input.exitLock(); }
+    if (input.takePressed('KeyV')) {
+      map.close();
+      cam.toggleAerial();
+      if (cam.aerial) releasePointer(); else grabPointer();
+    }
     if (input.takePressed('Escape')) {
       if (map.isOpen) { map.close(); if (!paused) input.requestLock(); }
       else if (talking) closeTalk();
