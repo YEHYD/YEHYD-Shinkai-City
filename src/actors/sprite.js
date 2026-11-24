@@ -192,7 +192,9 @@ export function createActor(def, views, opts = {}) {
     const aspect = views[v].aspect ?? 0.5;
     state.lastAspect = aspect;
     quad.scale.x = def.height * aspect;
-    material.needsUpdate = true;
+    // No material.needsUpdate here on purpose: the shader always carries a map and only
+    // the texture changes, so revalidating the program on every front/side/back flip would
+    // cost a hitch for nothing.
   }
   setView('front');
   state.lastAspect = views.front?.aspect ?? 0.5;

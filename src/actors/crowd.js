@@ -14,6 +14,12 @@ const VIEWS = ['front', 'side', 'back'];
 const FRONT_COS = 0.42;
 const BACK_COS = -0.42;
 
+// Beyond this the walker is a couple of pixels tall and sitting in fog — skip its
+// billboard matrix and its furniture push entirely. The named characters and the
+// traffic keep their own, much larger, ranges.
+const CULL_FAR = 118;
+const PUSH_FAR = 46;   // only settle collisions this close to the camera
+
 const UP = new THREE.Vector3(0, 1, 0);
 
 function shadowTexture() {
@@ -237,7 +243,11 @@ export function createCrowd(sprites, opts = {}) {
           else if (w.t < -HALF + 6) { w.t = -HALF + 6; w.dir = 1; }
         }
         place(w);
-        clearOfFurniture(w);
+
+        const wdx = w.x - cx, wdz = w.z - cz;
+        const d2 = wdx * wdx + wdz * wdz;
+        if (d2 > CULL_FAR * CULL_FAR) continue;      // too far to see: no matrix, no push
+        if (d2 < PUSH_FAR * PUSH_FAR) clearOfFurniture(w);
 
         // --- facing: along the lane, or wherever an idle one happens to be looking
         if (!w.idle) {
