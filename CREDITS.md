@@ -11,6 +11,13 @@ and the horizon/ground fog blend are adapted from it. Original: https://github.c
 
 Per the MIT licence, that file keeps this notice at the top of its header comment.
 
+`src/actors/people/` (appearance, build, body, pose, crowd, shapes, palette) is copied from
+**yans_little_town** v2.0 (MIT licensed) — the 17-bone skinned pedestrian system used by the
+walk-around demo in `demo/people.html`. Two shims were added for this project: `random.js`
+(the FNV-1a hash those modules key their looks off) and `seats.js` (an empty seat table, since
+bench poses are not authored here). The import paths were adjusted; the drawing and posing
+logic is unchanged. Original: https://github.com/yans-labs
+
 ## Reference and inspiration
 
 * **thousand-town (千人小镇)** by 仪绘士 / YiHuiShiBY — CC BY 4.0. Read for its approach to
