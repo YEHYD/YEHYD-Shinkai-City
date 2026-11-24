@@ -27,6 +27,7 @@ import { createSocial } from './story/social.js';
 import { createDialogue } from './story/dialogue.js';
 import { createDialoguePanel } from './ui/dialoguePanel.js';
 import { createTeleportPanel } from './ui/teleport.js';
+import { createTimeDial } from './ui/timeDial.js';
 
 const canvas = document.getElementById('view');
 const hud = createHud();
@@ -320,6 +321,16 @@ async function start() {
     getPlayer: () => ({ x: player.position.x, z: player.position.z, facing: player.facing })
   });
 
+  // The dial is the only panel whose whole job is to write `s.minute`; rebuilding the
+  // atmosphere here means the sky, the fog and the characters all change under the hand
+  // while you drag, which is the point of it.
+  const dial = createTimeDial({
+    getMinute: () => s.minute,
+    getPhase: () => s.phase,
+    labelOf: m => clockLabel({ minute: m }),
+    onSet: m => { s.minute = m; atmosphere(s); }
+  });
+
   // ---------------------------------------------------------------- pointer lock & pause
   // The pointer is captured while you walk: the mouse turns the camera directly. Escape is
   // the browser's own "give the cursor back", so losing the lock means we pause — one key,
@@ -350,10 +361,33 @@ async function start() {
     if (everLocked && !panel.open && !map.isOpen && !cam.aerial) setPaused(true);
   });
   const grabPointer = () => {
-    if (panel.open || map.isOpen || cam.aerial) return;
+    if (panel.open || map.isOpen || dial.isOpen || cam.aerial) return;
     setPaused(false);
     input.requestLock();
   };
+  // Any panel that wants the cursor takes it away on purpose — the release counter in the
+  // lock handler is what keeps that from reading as "the player pressed Escape".
+  function openDial() {
+    if (dial.isOpen) return;
+    if (map.isOpen) map.close();
+    if (panel.open) closeTalk();
+    dial.open();
+    releasePointer();
+  }
+  // Two brackets pressed within a third of a second are a chord, not two nudges: undo the
+  // first press's twenty minutes so the dial opens at the time you were looking at.
+  let bracketAt = 0, bracketSign = 0;
+  function bracketStep(sign) {
+    const now = performance.now();
+    if (bracketSign && sign === -bracketSign && now - bracketAt < 320) {
+      s.minute -= bracketSign;
+      bracketAt = 0; bracketSign = 0;
+      openDial();
+      return;
+    }
+    s.minute += sign;
+    bracketAt = now; bracketSign = sign;
+  }
   canvas.addEventListener('click', grabPointer);
   pauseEl.addEventListener('click', grabPointer);
 
@@ -379,16 +413,19 @@ async function start() {
     // --- conversation keys. E opens, and also fast-forwards the typewriter.
     if (input.takePressed('KeyM')) {
       if (talking) closeTalk();
+      dial.close();
       map.toggle();
       if (map.isOpen) releasePointer(); else if (!paused) input.requestLock();
     }
     if (input.takePressed('KeyV')) {
       map.close();
+      dial.close();
       cam.toggleAerial();
       if (cam.aerial) releasePointer(); else grabPointer();
     }
     if (input.takePressed('Escape')) {
-      if (map.isOpen) { map.close(); if (!paused) input.requestLock(); }
+      if (dial.isOpen) { dial.close(); if (!paused) grabPointer(); }
+      else if (map.isOpen) { map.close(); if (!paused) input.requestLock(); }
       else if (talking) closeTalk();
     }
     if (input.takePressed('KeyE') && !map.isOpen && !cam.aerial) {
@@ -406,15 +443,19 @@ async function start() {
     // The map and the crane shot freeze them too — you are looking, not walking. Paused
     // (pointer released) stops the clock as well: coming back should find the street where
     // you left it, not two minutes later.
-    const frozen = talking || map.isOpen || cam.aerial || paused;
-    const sdt = paused ? 0 : dt;
+    const frozen = talking || map.isOpen || dial.isOpen || cam.aerial || paused;
+    const sdt = (paused || dial.isOpen) ? 0 : dt;
     state.forward = frozen ? 0 : raw.forward;
     state.right = frozen ? 0 : raw.right;
     state.run = frozen ? false : raw.run;
 
-    // time of day: [ and ] nudge the clock, useful for judging the light
-    if (input.takePressed('BracketLeft')) s.minute -= 20;
-    if (input.takePressed('BracketRight')) s.minute += 20;
+    // time of day: [ and ] nudge the clock; the two together open the dial, because twenty
+    // minutes a press is a poor way to say "make it 19:40".
+    const bl = input.takePressed('BracketLeft');
+    const br = input.takePressed('BracketRight');
+    if (bl && br) openDial();
+    else if (bl) bracketStep(-20);
+    else if (br) bracketStep(20);
 
     tickAtmosphere(s, sdt);
     atmosphere(s);
@@ -454,7 +495,7 @@ async function start() {
 
     for (let i = 0; i < actors.length; i++) actors[i].update(camera, s, time);
     crowd.update(camera, s, sdt, time);
-    traffic.update(camera, s, sdt);
+    traffic.update(camera, s, sdt, player.position);
 
     if (self) {
       self.moveTo(player.position.x, player.position.z);
@@ -486,7 +527,7 @@ async function start() {
   if (!contactAOOn) setContactAO(false, scene);
 
   // Handy for poking at the scene from the console during visual QA.
-  window.__shinkai = { scene, camera, renderer, s, player, cam, actors, layout, sky, lighting, city, composer, input, sprites, self, social, dialogue, panel, frontage, crowd, traffic, map, safeSpot, THREE,
+  window.__shinkai = { scene, camera, renderer, s, player, cam, actors, layout, sky, lighting, city, composer, input, sprites, self, social, dialogue, panel, frontage, crowd, traffic, map, dial, safeSpot, THREE,
     get paused() { return paused; }, setPaused, grabPointer,
     fog: on => setHeightFog(on !== false, scene),
     ao: on => setContactAO(on !== false, scene) };

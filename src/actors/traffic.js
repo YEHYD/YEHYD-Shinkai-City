@@ -11,6 +11,13 @@ import { CELL, HALF, ROAD_HALF } from '../world/layout.js';
 const LANE = ROAD_HALF * 0.5;          // 3 m out from the centre line
 const CAR_L = 4.3, CAR_W = 1.86, CAR_H = 0.8;
 
+// Braking for pedestrians. A car starts easing off BRAKE_ZONE metres before you and is
+// brought to a hard stop two metres short of your feet; pulling away again is gentle
+// (ACCEL) so a street full of cars does not lurch every time someone crosses.
+const BRAKE_ZONE = 17;
+const BRAKE_A = 5.5;
+const ACCEL = 2.6;
+
 const PAINT = ['#c9ccd2', '#20232a', '#8e2130', '#2b4f7c', '#d8d2c6', '#3f4a44', '#54414f'];
 
 export function createTraffic(opts = {}) {
@@ -43,6 +50,8 @@ export function createTraffic(opts = {}) {
       dir,
       t: -HALF + 12 + ((slot + rnd.next()) / perSlot) * (HALF * 2 - 24),
       speed: 9,
+      v: 9,                 // speed this frame; only differs from `speed` while braking
+      wait: 0,              // seconds spent standing still, for jam release
       paint: new THREE.Color(rnd.pick(PAINT)),
       x: 0, z: 0, yaw: 0
     });
@@ -69,7 +78,7 @@ export function createTraffic(opts = {}) {
       // a lane's speed: deterministic per carriageway, so the grid feels varied but stable
       const seed = Math.abs(Math.round(lane.road) * 7 + (lane.axis === 'z' ? 3 : 1) + lane.dir);
       const speed = 6.5 + ((seed * 37) % 61) / 10;   // 6.5 … 12.5 m/s
-      for (const c of lane.queue) c.speed = speed;
+      for (const c of lane.queue) { c.speed = speed; c.v = speed; }
       laneQueues.push(lane);
     }
   }
@@ -128,11 +137,15 @@ export function createTraffic(opts = {}) {
     group,
     cars,
 
-    update(camera, s, dt) {
+    update(camera, s, dt, player) {
       // --- which crossings are in use right now: bit 1 for north–south, bit 2 for
       // east–west. A car about to enter a box the other axis already holds waits.
       const junction = new Map();
       for (const c of cars) {
+        // A car that has been standing still for a while is stuck, not crossing: it must
+        // not keep a box reserved, or one jammed car freezes the perpendicular street and
+        // the whole grid locks up around it.
+        if (c.wait > 1.5) continue;
         const i = Math.round((c.x + HALF) / CELL);
         const j = Math.round((c.z + HALF) / CELL);
         const jx = -HALF + CELL * i, jz = -HALF + CELL * j;
@@ -145,13 +158,72 @@ export function createTraffic(opts = {}) {
       for (const lane of laneQueues) {
         const q = lane.queue;
         const other = lane.axis === 'z' ? 2 : 1;
+
+        // --- you are a solid thing in the street. A car that finds you standing in its
+        // lane brakes behind you and only pulls away again once you step aside; the queue
+        // below then stacks up behind it, exactly as it would behind a stopped car.
+        // Worked out once per lane, because every car in a lane shares one centreline.
+        let stopAt = Infinity;
+        if (player) {
+          const laneOff = q[0].off;
+          const lat = lane.axis === 'z' ? player.x - (lane.road + laneOff)
+                                        : player.z - (lane.road + laneOff);
+          if (Math.abs(lat) < 2.35) {          // about one car width either side
+            const along = lane.axis === 'z' ? player.z : player.x;
+            stopAt = lane.dir > 0 ? along : -along;
+          }
+        }
+
         let limit = Infinity;
         for (let i = q.length - 1; i >= 0; i--) {
           const c = q[i];
           let p = lane.dir > 0 ? c.t : -c.t;
-          let next = p + c.speed * dt;
+
+          // Where this car ought to come to rest this frame, in lane-forward metres.
+          // The person is one reason to stop; a crossing it cannot clear is the other.
+          let stopPoint = Infinity;
+          if (stopAt !== Infinity && stopAt > p) {
+            // The person is ahead of this car. Stop two metres short of them; if someone
+            // appears right on the bumper (they walked into the lane), stop dead instead
+            // of creeping through them.
+            stopPoint = Math.max(p, stopAt - (CAR_L / 2 + 2.0));
+          }
+
+          // --- if the person is standing in the crossing ahead, wait on the near side of it.
+          // Stopping inside the box is what starts a gridlock: the box stays reserved for
+          // the cross street, which jams that one in turn.
+          const front = p + CAR_L / 2;
+          const kBox = Math.ceil((front + 7.5 + HALF) / CELL);
+          const boxC = -HALF + CELL * kBox;
+          const boxIn = boxC - 7.5 - CAR_L / 2;
+          const boxOut = boxC + 7.5 + CAR_L / 2;
+          if (p < boxIn && stopPoint > boxIn && stopPoint < boxOut) stopPoint = boxIn;
+
+          // Speed this frame: sqrt(2 a d) is the fastest you may still be going and stop
+          // short of the mark, so the car eases off the throttle instead of stamping on
+          // the brakes at the last metre.
+          let want = c.speed;
+          if (stopPoint !== Infinity) {
+            const gap = stopPoint - p;
+            if (gap <= 0.6) want = 0;
+            else if (gap < BRAKE_ZONE) want = Math.min(want, Math.sqrt(2 * BRAKE_A * gap));
+          }
+          c.v += want > c.v ? Math.min(ACCEL * dt, want - c.v)
+                            : -Math.min(BRAKE_A * dt, c.v - want);
+          c.v = Math.max(0, Math.min(c.v, c.speed));
+
+          let next = p + c.v * dt;
+          // Hard stop at the mark: a long frame must not carry the box through the person,
+          // and the car must never reverse to reach the gap.
+          if (stopPoint !== Infinity && stopPoint > p) next = Math.min(next, stopPoint);
           // never close on the car ahead: a queue keeps its spacing
           if (next > limit - MIN_GAP) next = Math.max(p, limit - MIN_GAP);
+
+          // A car held up by a queue (or by the player) is standing still, not coasting at
+          // full speed: bleed the speed so it pulls away again at a believable rate.
+          const moved = next - p;
+          if (moved < c.v * dt - 1e-4) c.v = Math.max(0, moved / Math.max(dt, 1e-4));
+          c.wait = c.v < 0.5 ? c.wait + dt : 0;
 
           const tn = lane.dir > 0 ? next : -next;
           const tc = lane.dir > 0 ? p : -p;
@@ -162,7 +234,18 @@ export function createTraffic(opts = {}) {
             const road = lane.road + c.off;
             const i2 = lane.axis === 'z' ? Math.round((road + HALF) / CELL) : idx;
             const j2 = lane.axis === 'z' ? idx : Math.round((road + HALF) / CELL);
-            if ((junction.get(i2 * 1000 + j2) || 0) & other) next = p;
+            // Two lanes can each reserve a box the other needs, and then neither ever
+            // moves: the stock grid deadlocks this way after any real blockage. Give way
+            // for a while, then go anyway — a grid that freezes forever is worse than a
+            // close call at a crossing.
+            if ((junction.get(i2 * 1000 + j2) || 0) & other) {
+              c.held = (c.held || 0) + dt;
+              if (c.held < 2.0) next = p;
+            } else {
+              c.held = 0;
+            }
+          } else {
+            c.held = 0;
           }
 
           c.t = lane.dir > 0 ? next : -next;
