@@ -284,7 +284,12 @@ export function createSky(scene, opts = {}) {
       map: cloudTexture(i % CLOUD_VARIANTS),
       transparent: true,
       depthWrite: false,
-      depthTest: false,
+      // The test has to stay ON. A transparent mesh is drawn *after* the opaque city, so
+      // with depthTest off these decks paint straight over the towers they are sitting
+      // behind: bands of cloud lying across rooftops, and a hard quad edge cutting the
+      // skyline. They live at 1150 m and up, well above anything built, so depth testing
+      // correctly keeps them behind every roofline.
+      depthTest: true,
       side: THREE.DoubleSide,
       fog: false,
       opacity: 0.9
