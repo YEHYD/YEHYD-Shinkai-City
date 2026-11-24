@@ -12,6 +12,7 @@ import { createAtmosphere, tickAtmosphere, atmosphere, clockLabel } from './scen
 import { createSky } from './scene/sky.js';
 import { createLighting } from './scene/lighting.js';
 import { createComposer } from './scene/composer.js';
+import { installHeightFog, setHeightFog } from './scene/heightFog.js';
 import { generateLayout, collisionBoxes, SPAWN, HALF } from './world/layout.js';
 import { buildCity } from './world/city.js';
 import { buildFrontage } from './world/frontage.js';
@@ -54,6 +55,24 @@ renderer.info.autoReset = false;
 const forced = /(?:^|[?&#])quality=(lite|full)\b/.exec(window.location.href)?.[1]
   || (/[?#]lite\b/.test(window.location.href) ? 'lite' : null);
 const quality = forced || (dpr > 2 || window.innerWidth < 720 ? 'lite' : 'full');
+
+// Height fog has to be patched in before the first material compiles. `?fog=off` is the A/B
+// switch: same camera, same clock, only the haze term changes. `?fogstrength=0.8&fogscale=14`
+// retunes it without an edit, which is what the tuning passes use.
+const urlNum = (key, fallback) => {
+  const hit = new RegExp(`[?&#]${key}=(\\d+(?:\\.\\d+)?)`).exec(window.location.href);
+  return hit ? parseFloat(hit[1]) : fallback;
+};
+installHeightFog({
+  strength: urlNum('fogstrength', quality === 'lite' ? 0.30 : 0.35),
+  scale: urlNum('fogscale', 12),
+  nearZ: urlNum('fognear', 8),
+  farZ: urlNum('fogfar', 60),
+  // `?fogdebug=1` paints vFogHeight (red) + depth ramp (green), `=2` the raw fog depth,
+  // `=3` the ground term / ramp / final factor. Tuning aid only; 0 is off.
+  debug: urlNum('fogdebug', 0)
+});
+const heightFogOn = !/[?&#]fog=off\b/.test(window.location.href);
 
 // A coarse roof-height grid over the city, for the crane shot. 12 m bins, max height
 // wins: cheap to build once, and exact enough to keep the lens out of the towers.
@@ -441,9 +460,14 @@ async function start() {
   hud.ready();
   loop.start();
 
+  // Height fog is patched into the shader source, so flipping it at runtime needs a
+  // recompile. `__shinkai.fog(false)` does that; handy for A/B screenshots.
+  if (!heightFogOn) setHeightFog(false, scene);
+
   // Handy for poking at the scene from the console during visual QA.
   window.__shinkai = { scene, camera, renderer, s, player, cam, actors, layout, sky, lighting, city, composer, input, sprites, self, social, dialogue, panel, frontage, crowd, traffic, map, safeSpot, THREE,
-    get paused() { return paused; }, setPaused, grabPointer };
+    get paused() { return paused; }, setPaused, grabPointer,
+    fog: on => setHeightFog(on !== false, scene) };
   console.log('%c[shinkai] ready', 'color:#7fb2ff', `buildings=${layout.buildings.length}`, `npc=${actors.length}`, `quality=${quality}`);
 }
 
