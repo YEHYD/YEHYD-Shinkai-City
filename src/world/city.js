@@ -10,6 +10,7 @@ import {
   groundMaps, facadeTextures, FACADE_VARIANTS, GROUND_TILE_METERS, styleForBuilding
 } from '../core/textures.js';
 import { makeRandom } from '../core/random.js';
+import { installContactAO } from '../scene/contactAO.js';
 import { CITY_SIZE, GRID, BAY_W, BAY_H, TILE_BAYS_X, TILE_BAYS_Y, HALF } from './layout.js';
 
 const TILE_W = BAY_W * TILE_BAYS_X;   // metres covered by one facade tile
@@ -164,7 +165,7 @@ export function buildCity(layout, renderer) {
       metalness: 0.14,
       envMapIntensity: 0.85
     });
-    wallMaterials.push(mat);
+    wallMaterials.push(installContactAO(mat));
     const mesh = new THREE.Mesh(merged, mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;

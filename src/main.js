@@ -13,6 +13,7 @@ import { createSky } from './scene/sky.js';
 import { createLighting } from './scene/lighting.js';
 import { createComposer } from './scene/composer.js';
 import { installHeightFog, setHeightFog } from './scene/heightFog.js';
+import { setContactAO } from './scene/contactAO.js';
 import { generateLayout, collisionBoxes, SPAWN, HALF } from './world/layout.js';
 import { buildCity } from './world/city.js';
 import { buildFrontage } from './world/frontage.js';
@@ -73,6 +74,9 @@ installHeightFog({
   debug: urlNum('fogdebug', 0)
 });
 const heightFogOn = !/[?&#]fog=off\b/.test(window.location.href);
+// `?ao=off` is the A/B switch for the wall-foot darkening; the term is patched into the wall
+// materials when the city is built (src/world/city.js), so only the on/off part lives here.
+const contactAOOn = !/[?&#]ao=off\b/.test(window.location.href);
 
 // A coarse roof-height grid over the city, for the crane shot. 12 m bins, max height
 // wins: cheap to build once, and exact enough to keep the lens out of the towers.
@@ -463,11 +467,13 @@ async function start() {
   // Height fog is patched into the shader source, so flipping it at runtime needs a
   // recompile. `__shinkai.fog(false)` does that; handy for A/B screenshots.
   if (!heightFogOn) setHeightFog(false, scene);
+  if (!contactAOOn) setContactAO(false, scene);
 
   // Handy for poking at the scene from the console during visual QA.
   window.__shinkai = { scene, camera, renderer, s, player, cam, actors, layout, sky, lighting, city, composer, input, sprites, self, social, dialogue, panel, frontage, crowd, traffic, map, safeSpot, THREE,
     get paused() { return paused; }, setPaused, grabPointer,
-    fog: on => setHeightFog(on !== false, scene) };
+    fog: on => setHeightFog(on !== false, scene),
+    ao: on => setContactAO(on !== false, scene) };
   console.log('%c[shinkai] ready', 'color:#7fb2ff', `buildings=${layout.buildings.length}`, `npc=${actors.length}`, `quality=${quality}`);
 }
 
