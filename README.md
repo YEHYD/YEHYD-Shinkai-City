@@ -26,10 +26,6 @@ node tools/serve.mjs --port 8150
 `WASD` 走、`Shift` 跑、点画面锁鼠标转视角、`F` 跟拍一个路人（再按 `F` 换人，`G` 退出）、
 `Esc` 暂停。`?quality=lite` 减半阴影与面数，`?n=60` 改人数。
 
-行人来自 `src/actors/people/`——yans_little_town 的 17 骨骼蒙皮系统（MIT，见 CREDITS.md），
-22 种职业/年龄外观，**整个 140 人的队伍只花 2 个 draw call**、约 12.5 万三角面（≈890 面/人）。
-主场景里那 520 个纸片路人暂时没动，这个 demo 是独立页面。
-
 ## 单文件演示版（拷去别的设备用）
 
 ```bash
